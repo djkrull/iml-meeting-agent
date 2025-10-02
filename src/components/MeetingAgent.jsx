@@ -1114,7 +1114,7 @@ const MeetingAgent = () => {
                             {meeting.programName}
                           </span>
                           <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getTypeBadgeColor(meeting.programType)}`}>
-                            {meeting.programType}
+                            {meeting.programType} {meeting.programYear}
                           </span>
                         </div>
 

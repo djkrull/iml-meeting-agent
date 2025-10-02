@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X } from 'lucide-react';
+import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X, Download } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
@@ -94,6 +94,110 @@ const DirectorReviewView = ({ reviewId }) => {
   const cancelEditing = () => {
     setEditingMeetingId(null);
     setEditedDescription('');
+  };
+
+  const exportToOutlook = () => {
+    if (!review || !review.meetings || review.meetings.length === 0) {
+      alert('No meetings to export');
+      return;
+    }
+
+    // Helper function to format date/time for ICS
+    const formatICSDateTime = (date, time) => {
+      const [hours, minutes] = time.split(':');
+      const dt = new Date(date);
+      dt.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+      const year = dt.getFullYear();
+      const month = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      const hour = String(dt.getHours()).padStart(2, '0');
+      const minute = String(dt.getMinutes()).padStart(2, '0');
+
+      return `${year}${month}${day}T${hour}${minute}00`;
+    };
+
+    // Helper function to calculate end time
+    const calculateEndTime = (startDateTime, durationMinutes) => {
+      const dt = new Date(
+        startDateTime.slice(0, 4),
+        parseInt(startDateTime.slice(4, 6)) - 1,
+        startDateTime.slice(6, 8),
+        startDateTime.slice(9, 11),
+        startDateTime.slice(11, 13)
+      );
+      dt.setMinutes(dt.getMinutes() + durationMinutes);
+
+      const year = dt.getFullYear();
+      const month = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      const hour = String(dt.getHours()).padStart(2, '0');
+      const minute = String(dt.getMinutes()).padStart(2, '0');
+
+      return `${year}${month}${day}T${hour}${minute}00`;
+    };
+
+    // Build ICS file content
+    let icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//IML Meeting Agent//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:IML Preliminary Meetings',
+      'X-WR-TIMEZONE:Europe/Stockholm'
+    ];
+
+    // Filter meetings (exclude Kleindagarna, Summer Onboarding/Weekly Welcome, already-scheduled)
+    const meetingsToExport = review.meetings.filter(meeting => {
+      if (meeting.program_type === 'Kleindagarna') return false;
+      if (meeting.program_type === 'Summer Conference' &&
+          (meeting.type.includes('Onboarding') || meeting.type.includes('Weekly Welcome'))) {
+        return false;
+      }
+      if (meeting.status === 'already-scheduled') return false;
+      return true;
+    });
+
+    meetingsToExport.forEach((meeting) => {
+      const startDateTime = formatICSDateTime(meeting.date, meeting.time);
+      const endDateTime = calculateEndTime(startDateTime, meeting.duration);
+      const timestamp = formatICSDateTime(new Date(), '12:00');
+
+      // Get program year
+      const programYear = meeting.program_year || new Date(meeting.date).getFullYear();
+      const programTypeWithYear = `${meeting.program_type} ${programYear}`;
+
+      // Build participants string
+      const participantsStr = Array.isArray(meeting.participants)
+        ? meeting.participants.join(', ')
+        : (typeof meeting.participants === 'string' ? JSON.parse(meeting.participants).join(', ') : '');
+
+      icsContent.push('BEGIN:VEVENT');
+      icsContent.push(`UID:iml-meeting-${meeting.id}-${Date.now()}@institutmittagleffler.se`);
+      icsContent.push(`DTSTAMP:${timestamp}`);
+      icsContent.push(`DTSTART:${startDateTime}`);
+      icsContent.push(`DTEND:${endDateTime}`);
+      icsContent.push(`SUMMARY:Prl: ${meeting.type} - ${programTypeWithYear}`);
+      icsContent.push(`DESCRIPTION:${meeting.description || ''}\\n\\nParticipants: ${participantsStr}\\n\\nProgram: ${meeting.program_name}`);
+      icsContent.push(`LOCATION:Institut Mittag-Leffler`);
+      icsContent.push(`CATEGORIES:${meeting.program_type}`);
+      icsContent.push(`STATUS:TENTATIVE`);
+      icsContent.push('END:VEVENT');
+    });
+
+    icsContent.push('END:VCALENDAR');
+
+    // Create and download the file
+    const icsBlob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(icsBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `IML_Preliminary_Meetings_${new Date().toISOString().split('T')[0]}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const formatDate = (dateStr) => {
@@ -207,7 +311,17 @@ const DirectorReviewView = ({ reviewId }) => {
               <h1 className="text-3xl font-bold text-gray-800">Meeting Review</h1>
               <p className="text-gray-600 mt-2">Welcome, {directorName}</p>
             </div>
-            <Calendar className="w-12 h-12 text-indigo-600" />
+            <div className="flex items-center gap-4">
+              <button
+                onClick={exportToOutlook}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 transition"
+                title="Export all meetings to Outlook calendar"
+              >
+                <Download className="w-5 h-5" />
+                Export to Outlook
+              </button>
+              <Calendar className="w-12 h-12 text-indigo-600" />
+            </div>
           </div>
           <div className="bg-indigo-50 p-4 rounded-lg">
             <p className="text-sm text-indigo-800">
