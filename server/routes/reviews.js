@@ -84,6 +84,28 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// Update meeting details
+router.patch('/:id/meetings/:meetingId', async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    const { description } = req.body;
+
+    if (!description) {
+      return res.status(400).json({ error: 'Description is required' });
+    }
+
+    await dbHelpers.updateMeetingDescription(meetingId, description);
+
+    res.json({
+      success: true,
+      message: 'Meeting updated'
+    });
+  } catch (error) {
+    console.error('Error updating meeting:', error);
+    res.status(500).json({ error: 'Failed to update meeting' });
+  }
+});
+
 // Submit approval for a meeting
 router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
   try {

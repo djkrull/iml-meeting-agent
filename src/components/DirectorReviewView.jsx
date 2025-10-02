@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
@@ -8,6 +8,8 @@ const DirectorReviewView = ({ reviewId }) => {
   const [loading, setLoading] = useState(true);
   const [directorName, setDirectorName] = useState('');
   const [showNamePrompt, setShowNamePrompt] = useState(true);
+  const [editingMeetingId, setEditingMeetingId] = useState(null);
+  const [editedDescription, setEditedDescription] = useState('');
 
   const fetchReview = useCallback(async () => {
     try {
@@ -57,6 +59,38 @@ const DirectorReviewView = ({ reviewId }) => {
       console.error('Error submitting approval:', error);
       alert('Failed to submit approval');
     }
+  };
+
+  const updateMeetingDescription = async (meetingId, newDescription) => {
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${reviewId}/meetings/${meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: newDescription })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update meeting');
+      }
+
+      // Refresh the review
+      fetchReview();
+      setEditingMeetingId(null);
+      setEditedDescription('');
+    } catch (error) {
+      console.error('Error updating meeting:', error);
+      alert('Failed to update meeting description');
+    }
+  };
+
+  const startEditing = (meeting) => {
+    setEditingMeetingId(meeting.id);
+    setEditedDescription(meeting.description || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingMeetingId(null);
+    setEditedDescription('');
   };
 
   const formatDate = (dateStr) => {
@@ -218,7 +252,44 @@ const DirectorReviewView = ({ reviewId }) => {
                       </div>
                     </div>
 
-                    <p className="text-sm text-gray-600 mb-3">{meeting.description}</p>
+                    {/* Description with Edit capability */}
+                    <div className="mb-3">
+                      {editingMeetingId === meeting.id ? (
+                        <div className="flex gap-2 items-start">
+                          <textarea
+                            value={editedDescription}
+                            onChange={(e) => setEditedDescription(e.target.value)}
+                            className="flex-1 px-3 py-2 border border-indigo-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            rows="3"
+                          />
+                          <button
+                            onClick={() => updateMeetingDescription(meeting.id, editedDescription)}
+                            className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                            title="Save"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            className="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition"
+                            title="Cancel"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          <p className="text-sm text-gray-600 flex-1">{meeting.description}</p>
+                          <button
+                            onClick={() => startEditing(meeting)}
+                            className="text-indigo-600 hover:text-indigo-800 transition"
+                            title="Edit description"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Other Directors' Approvals */}
                     {otherApprovals.length > 0 && (

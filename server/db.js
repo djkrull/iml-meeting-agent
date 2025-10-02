@@ -200,6 +200,20 @@ const dbHelpers = {
         }
       );
     });
+  },
+
+  // Update meeting description
+  updateMeetingDescription: (meetingId, description) => {
+    return new Promise((resolve, reject) => {
+      db.run(
+        'UPDATE meetings SET description = ? WHERE id = ?',
+        [description, meetingId],
+        function(err) {
+          if (err) reject(err);
+          else resolve({ id: meetingId, changes: this.changes });
+        }
+      );
+    });
   }
 };
 
