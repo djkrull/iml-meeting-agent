@@ -142,7 +142,7 @@ const MeetingAgent = () => {
         name: 'Check-in Meeting - Group 2',
         leadTime: -90, // Same day as Group 1, right after
         weekday: 5, // Friday
-        time: '10:30',
+        time: '15:00',
         participants: ['Conference Organizer Group 2', 'Admin Team'],
         duration: 30,
         description: 'Pre-conference preparations review'

@@ -51,11 +51,13 @@ async function initializePostgresDatabase() {
         type TEXT NOT NULL,
         program_name TEXT NOT NULL,
         program_type TEXT NOT NULL,
+        program_year INTEGER,
         date TIMESTAMP NOT NULL,
         time TEXT NOT NULL,
         duration INTEGER NOT NULL,
         participants JSONB NOT NULL,
         description TEXT,
+        status TEXT DEFAULT 'pending',
         requires_directors INTEGER DEFAULT 1,
         FOREIGN KEY (review_id) REFERENCES reviews(id)
       )
@@ -102,11 +104,13 @@ function initializeSQLiteDatabase() {
         type TEXT NOT NULL,
         program_name TEXT NOT NULL,
         program_type TEXT NOT NULL,
+        program_year INTEGER,
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         duration INTEGER NOT NULL,
         participants TEXT NOT NULL,
         description TEXT,
+        status TEXT DEFAULT 'pending',
         requires_directors INTEGER DEFAULT 1,
         FOREIGN KEY (review_id) REFERENCES reviews(id)
       )
@@ -171,19 +175,21 @@ const dbHelpers = {
       if (USE_POSTGRES) {
         try {
           const result = await pool.query(
-            `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, date, time, duration, participants, description, requires_directors)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+            `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, program_year, date, time, duration, participants, description, status, requires_directors)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
             [
               reviewId,
               meeting.id,
               meeting.type,
               meeting.programName,
               meeting.programType,
+              meeting.programYear || null,
               dateStr,
               meeting.time,
               meeting.duration,
               JSON.stringify(meeting.participants),
               meeting.description,
+              meeting.status || 'pending',
               meeting.requiresDirectors || 1
             ]
           );
@@ -193,19 +199,21 @@ const dbHelpers = {
         }
       } else {
         db.run(
-          `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, date, time, duration, participants, description, requires_directors)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, program_year, date, time, duration, participants, description, status, requires_directors)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             reviewId,
             meeting.id,
             meeting.type,
             meeting.programName,
             meeting.programType,
+            meeting.programYear || null,
             dateStr,
             meeting.time,
             meeting.duration,
             JSON.stringify(meeting.participants),
             meeting.description,
+            meeting.status || 'pending',
             meeting.requiresDirectors || 1
           ],
           function(err) {
