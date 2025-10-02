@@ -86,6 +86,25 @@ const DirectorReviewView = ({ reviewId }) => {
     }
   };
 
+  const getProgramTypeColor = (programType) => {
+    const type = programType?.toLowerCase() || '';
+    if (type.includes('fall') || type.includes('höst')) {
+      return 'bg-orange-500 text-white';
+    } else if (type.includes('spring') || type.includes('vår')) {
+      return 'bg-green-500 text-white';
+    } else if (type.includes('summer') || type.includes('sommar')) {
+      return 'bg-yellow-500 text-white';
+    } else if (type.includes('winter') || type.includes('vinter')) {
+      return 'bg-blue-500 text-white';
+    } else if (type.includes('workshop')) {
+      return 'bg-purple-500 text-white';
+    } else if (type.includes('conference') || type.includes('konferens')) {
+      return 'bg-indigo-500 text-white';
+    } else {
+      return 'bg-gray-500 text-white';
+    }
+  };
+
   if (showNamePrompt) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8 flex items-center justify-center">
@@ -176,6 +195,9 @@ const DirectorReviewView = ({ reviewId }) => {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="text-xl font-semibold text-gray-800">{meeting.type}</h3>
+                      <span className={`text-sm px-3 py-1 rounded-full font-medium ${getProgramTypeColor(meeting.program_type)}`}>
+                        {meeting.program_type}
+                      </span>
                       <span className="text-sm bg-gray-200 px-3 py-1 rounded-full">
                         {meeting.program_name}
                       </span>
