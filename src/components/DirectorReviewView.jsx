@@ -10,6 +10,7 @@ const DirectorReviewView = ({ reviewId }) => {
   const [showNamePrompt, setShowNamePrompt] = useState(true);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [editedDescription, setEditedDescription] = useState('');
+  const [changingDecisionId, setChangingDecisionId] = useState(null);
 
   const fetchReview = useCallback(async () => {
     try {
@@ -53,6 +54,8 @@ const DirectorReviewView = ({ reviewId }) => {
           suggestedTime
         })
       });
+      // Clear changing decision state
+      setChangingDecisionId(null);
       // Refresh review
       fetchReview();
     } catch (error) {
@@ -316,7 +319,7 @@ const DirectorReviewView = ({ reviewId }) => {
 
                   {/* Approval Buttons */}
                   <div className="flex flex-col gap-2 ml-4">
-                    {myApproval ? (
+                    {myApproval && changingDecisionId !== meeting.id ? (
                       <div className="text-center">
                         <div className={`px-4 py-2 rounded-lg font-medium ${
                           myApproval.status === 'approved'
@@ -328,7 +331,7 @@ const DirectorReviewView = ({ reviewId }) => {
                           Your status: {myApproval.status}
                         </div>
                         <button
-                          onClick={() => submitApproval(meeting.id, 'pending')}
+                          onClick={() => setChangingDecisionId(meeting.id)}
                           className="text-xs text-indigo-600 hover:text-indigo-800 mt-2"
                         >
                           Change decision
