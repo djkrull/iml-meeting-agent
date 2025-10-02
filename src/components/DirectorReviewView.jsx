@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X, Download } from 'lucide-react';
+import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X, Download, Info } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
@@ -252,27 +252,30 @@ const DirectorReviewView = ({ reviewId }) => {
         <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Director Review Access</h2>
           <p className="text-gray-600 mb-6">
-            Please enter your name to access the meeting review:
+            Please select your name to access the meeting review:
           </p>
-          <input
-            type="text"
-            value={directorName}
-            onChange={(e) => setDirectorName(e.target.value)}
-            placeholder="Your name (e.g., Director A)"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            onClick={() => {
-              if (directorName.trim()) {
+          <div className="space-y-3">
+            <button
+              onClick={() => {
+                setDirectorName('Tobias Ekholm, Director');
                 setShowNamePrompt(false);
-              } else {
-                alert('Please enter your name');
-              }
-            }}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold transition"
-          >
-            Continue to Review
-          </button>
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
+            >
+              <span>Tobias Ekholm</span>
+              <span className="text-sm text-indigo-200">Director</span>
+            </button>
+            <button
+              onClick={() => {
+                setDirectorName('Hans Ringström, Deputy Director');
+                setShowNamePrompt(false);
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
+            >
+              <span>Hans Ringström</span>
+              <span className="text-sm text-indigo-200">Deputy Director</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -323,11 +326,19 @@ const DirectorReviewView = ({ reviewId }) => {
               <Calendar className="w-12 h-12 text-indigo-600" />
             </div>
           </div>
-          <div className="bg-indigo-50 p-4 rounded-lg">
+          <div className="bg-indigo-50 p-4 rounded-lg space-y-2">
             <p className="text-sm text-indigo-800">
               <strong>Note:</strong> You can see other directors' approvals in real-time.
               Review each meeting and approve, reject, or add comments as needed.
             </p>
+            <div className="flex items-start gap-2 text-sm text-indigo-700 bg-indigo-100 p-3 rounded">
+              <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <strong>Export Instructions:</strong> Click "Export to Outlook" to download an .ics file.
+                In Outlook: File → Open & Export → Import/Export → Import an iCalendar (.ics) file.
+                All meetings are marked as tentative/preliminary pending organizer confirmation.
+              </div>
+            </div>
           </div>
         </div>
 
