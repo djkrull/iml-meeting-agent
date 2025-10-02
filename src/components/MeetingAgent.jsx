@@ -124,7 +124,7 @@ const MeetingAgent = () => {
         name: 'Introduction Meeting - Group 2',
         leadTime: -240, // Same day as Group 1, right after
         weekday: 5, // Friday
-        time: '10:30',
+        time: '15:00',
         participants: ['Conference Organizer Group 2', 'Admin Team'],
         duration: 30,
         description: 'Initial planning for second conference group'
@@ -422,10 +422,10 @@ const MeetingAgent = () => {
 
             if (meetingDate) {
               summerConferenceMeetings.set(meetingKey, true);
-              const groupName = program.type === 'Kleindagarna' ? 'All Kleindagarna' : 'All Summer Conferences';
+              const groupName = program.type === 'Kleindagarna' ? 'Kleindagarna 2026' : 'All Summer Conferences';
               generatedMeetings.push({
                 id: meetingId++,
-                programId: program.type === 'Kleindagarna' ? 'all-kleindagarna' : 'all-summer',
+                programId: program.type === 'Kleindagarna' ? 'kleindagarna-2026' : 'all-summer',
                 programName: groupName,
                 programType: program.type,
                 type: meetingType.name,
