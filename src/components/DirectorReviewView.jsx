@@ -226,6 +226,8 @@ const DirectorReviewView = ({ reviewId }) => {
                 (meeting.type.includes('Onboarding') || meeting.type.includes('Weekly Welcome'))) {
               return false;
             }
+            // Filter out already scheduled meetings
+            if (meeting.status === 'already-scheduled') return false;
             return true;
           }).map((meeting) => {
             const myApproval = getMyApproval(meeting);
