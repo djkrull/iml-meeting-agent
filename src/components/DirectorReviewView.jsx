@@ -231,6 +231,10 @@ const DirectorReviewView = ({ reviewId }) => {
             const myApproval = getMyApproval(meeting);
             const otherApprovals = getOtherApprovals(meeting);
 
+            // Extract year from meeting date
+            const meetingYear = new Date(meeting.date).getFullYear();
+            const programTypeWithYear = `${meeting.program_type} ${meetingYear}`;
+
             return (
               <div
                 key={meeting.id}
@@ -241,7 +245,7 @@ const DirectorReviewView = ({ reviewId }) => {
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="text-xl font-semibold text-gray-800">{meeting.type}</h3>
                       <span className={`text-sm px-3 py-1 rounded-full font-medium ${getProgramTypeColor(meeting.program_type)}`}>
-                        {meeting.program_type}
+                        {programTypeWithYear}
                       </span>
                       <span className="text-sm bg-gray-200 px-3 py-1 rounded-full">
                         {meeting.program_name}
