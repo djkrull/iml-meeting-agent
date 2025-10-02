@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+
 const DirectorReviewView = ({ reviewId }) => {
   const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -18,19 +20,27 @@ const DirectorReviewView = ({ reviewId }) => {
 
   const fetchReview = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/api/reviews/${reviewId}`);
+      const response = await fetch(`${API_URL}/api/reviews/${reviewId}`);
+      if (!response.ok) {
+        console.error('Failed to fetch review, status:', response.status);
+        setReview(null);
+        setLoading(false);
+        return;
+      }
       const data = await response.json();
+      console.log('Review loaded successfully:', data.id, 'Meetings:', data.meetings?.length);
       setReview(data);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching review:', error);
+      setReview(null);
       setLoading(false);
     }
   };
 
   const submitApproval = async (meetingId, status, comment = '', suggestedDate = '', suggestedTime = '') => {
     try {
-      await fetch(`http://localhost:3001/api/reviews/${reviewId}/meetings/${meetingId}/approve`, {
+      await fetch(`${API_URL}/api/reviews/${reviewId}/meetings/${meetingId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

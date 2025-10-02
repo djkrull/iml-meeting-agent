@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 const MeetingAgent = () => {
   const [programs, setPrograms] = useState([]);
@@ -695,7 +696,7 @@ const MeetingAgent = () => {
         };
       });
 
-      const response = await fetch('http://localhost:3001/api/reviews', {
+      const response = await fetch(`${API_URL}/api/reviews`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
