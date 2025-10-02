@@ -19,7 +19,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Review server running on port ${PORT}`);
   console.log(`API available at http://localhost:${PORT}/api`);
 });
