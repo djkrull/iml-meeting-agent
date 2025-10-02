@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -9,16 +9,7 @@ const DirectorReviewView = ({ reviewId }) => {
   const [directorName, setDirectorName] = useState('');
   const [showNamePrompt, setShowNamePrompt] = useState(true);
 
-  useEffect(() => {
-    if (reviewId && directorName) {
-      fetchReview();
-      // Poll for updates every 5 seconds
-      const interval = setInterval(fetchReview, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [reviewId, directorName]);
-
-  const fetchReview = async () => {
+  const fetchReview = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/api/reviews/${reviewId}`);
       if (!response.ok) {
@@ -36,7 +27,16 @@ const DirectorReviewView = ({ reviewId }) => {
       setReview(null);
       setLoading(false);
     }
-  };
+  }, [reviewId]);
+
+  useEffect(() => {
+    if (reviewId && directorName) {
+      fetchReview();
+      // Poll for updates every 5 seconds
+      const interval = setInterval(fetchReview, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [reviewId, directorName, fetchReview]);
 
   const submitApproval = async (meetingId, status, comment = '', suggestedDate = '', suggestedTime = '') => {
     try {
