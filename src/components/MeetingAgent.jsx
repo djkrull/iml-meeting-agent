@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 const MeetingAgent = () => {
-  const [programs, setPrograms] = useState([]);
-  const [meetings, setMeetings] = useState([]);
+  // Load saved data from localStorage on initial mount
+  const [programs, setPrograms] = useState(() => {
+    const saved = localStorage.getItem('iml-programs');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [meetings, setMeetings] = useState(() => {
+    const saved = localStorage.getItem('iml-meetings');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
@@ -21,6 +28,20 @@ const MeetingAgent = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [reviewUrl, setReviewUrl] = useState(null);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // Save programs to localStorage whenever they change
+  useEffect(() => {
+    if (programs.length > 0) {
+      localStorage.setItem('iml-programs', JSON.stringify(programs));
+    }
+  }, [programs]);
+
+  // Save meetings to localStorage whenever they change
+  useEffect(() => {
+    if (meetings.length > 0) {
+      localStorage.setItem('iml-meetings', JSON.stringify(meetings));
+    }
+  }, [meetings]);
 
   // Debug: Component loaded
   console.log('MeetingAgent component loaded');
