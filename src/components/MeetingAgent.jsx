@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -28,6 +28,9 @@ const MeetingAgent = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [reviewUrl, setReviewUrl] = useState(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [currentReviewId, setCurrentReviewId] = useState(() => {
+    return localStorage.getItem('iml-current-review-id') || null;
+  });
 
   // Save programs to localStorage whenever they change
   useEffect(() => {
@@ -742,6 +745,8 @@ const MeetingAgent = () => {
       if (data.success) {
         const fullUrl = `${window.location.origin}/review/${data.reviewId}`;
         setReviewUrl(fullUrl);
+        setCurrentReviewId(data.reviewId);
+        localStorage.setItem('iml-current-review-id', data.reviewId);
         setShowShareModal(true);
       } else {
         alert('Failed to create review');
@@ -755,6 +760,51 @@ const MeetingAgent = () => {
   const copyReviewUrl = () => {
     navigator.clipboard.writeText(reviewUrl);
     alert('Review URL copied to clipboard!');
+  };
+
+  // Refresh approvals from database
+  const refreshApprovals = async () => {
+    if (!currentReviewId) {
+      alert('No active review. Please share for review first.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch review');
+      }
+
+      const reviewData = await response.json();
+
+      // Update meetings with approval counts from the database
+      setMeetings(prevMeetings => {
+        return prevMeetings.map(meeting => {
+          // Find matching meeting in review data by meeting_id
+          const dbMeeting = reviewData.meetings.find(m => m.meeting_id === meeting.id);
+
+          if (dbMeeting) {
+            const approvedCount = dbMeeting.approvals?.filter(a => a.status === 'approved').length || 0;
+            const rejectedCount = dbMeeting.approvals?.filter(a => a.status === 'rejected').length || 0;
+
+            // Update meeting with approval info
+            return {
+              ...meeting,
+              approvedCount,
+              rejectedCount,
+              approvals: dbMeeting.approvals || [],
+              approved: approvedCount > 0 && rejectedCount === 0
+            };
+          }
+          return meeting;
+        });
+      });
+
+      alert('Approvals refreshed successfully!');
+    } catch (error) {
+      console.error('Error refreshing approvals:', error);
+      alert('Failed to refresh approvals. Make sure the server is running.');
+    }
   };
 
   // Export to ICS (iCalendar) format for Outlook
@@ -1039,6 +1089,16 @@ const MeetingAgent = () => {
                 <Share2 className="w-5 h-5" />
                 Share for Director Review
               </button>
+              {currentReviewId && (
+                <button
+                  onClick={refreshApprovals}
+                  className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                  title="Refresh approval status from directors"
+                >
+                  <RefreshCw className="w-5 h-5" />
+                  Refresh Approvals
+                </button>
+              )}
               <button
                 onClick={approveAll}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
