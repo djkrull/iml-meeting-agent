@@ -219,7 +219,15 @@ const DirectorReviewView = ({ reviewId }) => {
 
         {/* Meetings List */}
         <div className="space-y-4">
-          {review.meetings?.filter(meeting => meeting.program_type !== 'Kleindagarna').map((meeting) => {
+          {review.meetings?.filter(meeting => {
+            // Filter out meetings that don't need director approval
+            if (meeting.program_type === 'Kleindagarna') return false;
+            if (meeting.program_type === 'Summer Conference' &&
+                (meeting.type.includes('Onboarding') || meeting.type.includes('Weekly Welcome'))) {
+              return false;
+            }
+            return true;
+          }).map((meeting) => {
             const myApproval = getMyApproval(meeting);
             const otherApprovals = getOtherApprovals(meeting);
 
