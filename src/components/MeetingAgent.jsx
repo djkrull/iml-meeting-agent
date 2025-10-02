@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -9,6 +9,8 @@ const MeetingAgent = () => {
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [editingMeetingId, setEditingMeetingId] = useState(null);
+  const [editedDescription, setEditedDescription] = useState('');
   const [filters, setFilters] = useState({
     'Spring Program': true,
     'Fall Program': true,
@@ -673,6 +675,25 @@ const MeetingAgent = () => {
     XLSX.writeFile(wb, `IML_Meetings_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
+  // Edit meeting description
+  const startEditing = (meeting) => {
+    setEditingMeetingId(meeting.id);
+    setEditedDescription(meeting.description || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingMeetingId(null);
+    setEditedDescription('');
+  };
+
+  const saveDescription = (meetingId) => {
+    setMeetings(meetings.map(m =>
+      m.id === meetingId ? { ...m, description: editedDescription } : m
+    ));
+    setEditingMeetingId(null);
+    setEditedDescription('');
+  };
+
   // Share for review
   const shareForReview = async () => {
     if (meetings.length === 0) {
@@ -1145,7 +1166,44 @@ const MeetingAgent = () => {
                           </div>
                         )}
 
-                        <p className="text-sm text-gray-600 mb-2">{meeting.description}</p>
+                        {/* Description with Edit capability */}
+                        <div className="mb-2">
+                          {editingMeetingId === meeting.id ? (
+                            <div className="flex gap-2 items-start">
+                              <textarea
+                                value={editedDescription}
+                                onChange={(e) => setEditedDescription(e.target.value)}
+                                className="flex-1 px-3 py-2 border border-indigo-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                rows="3"
+                              />
+                              <button
+                                onClick={() => saveDescription(meeting.id)}
+                                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                                title="Save"
+                              >
+                                <Save className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={cancelEditing}
+                                className="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition"
+                                title="Cancel"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-start gap-2">
+                              <p className="text-sm text-gray-600 flex-1">{meeting.description}</p>
+                              <button
+                                onClick={() => startEditing(meeting)}
+                                className="text-indigo-600 hover:text-indigo-800 transition"
+                                title="Edit description"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
 
                         <div className="text-xs text-gray-500">
                           <strong>Participants:</strong> {meeting.participants.join(', ')}
