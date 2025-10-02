@@ -231,9 +231,9 @@ const DirectorReviewView = ({ reviewId }) => {
             const myApproval = getMyApproval(meeting);
             const otherApprovals = getOtherApprovals(meeting);
 
-            // Extract year from meeting date
-            const meetingYear = new Date(meeting.date).getFullYear();
-            const programTypeWithYear = `${meeting.program_type} ${meetingYear}`;
+            // Use program year from program start date, or fall back to meeting date
+            const programYear = meeting.program_year || new Date(meeting.date).getFullYear();
+            const programTypeWithYear = `${meeting.program_type} ${programYear}`;
 
             return (
               <div
