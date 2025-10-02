@@ -328,8 +328,8 @@ const DirectorReviewView = ({ reviewId }) => {
           </div>
           <div className="bg-indigo-50 p-4 rounded-lg space-y-2">
             <p className="text-sm text-indigo-800">
-              <strong>Note:</strong> You can see other directors' approvals in real-time.
-              Review each meeting and approve, reject, or add comments as needed.
+              <strong>Note:</strong> You can see other directors' responses in real-time.
+              Please indicate your availability for each meeting so IML admin can plan before inviting organizers.
             </p>
             <div className="flex items-start gap-2 text-sm text-indigo-700 bg-indigo-100 p-3 rounded">
               <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -439,10 +439,10 @@ const DirectorReviewView = ({ reviewId }) => {
                       )}
                     </div>
 
-                    {/* Other Directors' Approvals */}
+                    {/* Other Directors' Responses */}
                     {otherApprovals.length > 0 && (
                       <div className="bg-blue-50 p-3 rounded-lg mb-3">
-                        <p className="text-sm font-semibold text-blue-800 mb-2">Other Directors:</p>
+                        <p className="text-sm font-semibold text-blue-800 mb-2">Other Director's Response:</p>
                         {otherApprovals.map((approval, idx) => (
                           <div key={idx} className="flex items-center gap-2 text-sm">
                             {approval.status === 'approved' ? (
@@ -473,7 +473,7 @@ const DirectorReviewView = ({ reviewId }) => {
                             ? 'bg-red-600 text-white'
                             : 'bg-gray-400 text-white'
                         }`}>
-                          Your status: {myApproval.status}
+                          {myApproval.status === 'approved' ? 'Attending' : myApproval.status === 'rejected' ? 'Not available' : 'Pending'}
                         </div>
                         <button
                           onClick={() => setChangingDecisionId(meeting.id)}
@@ -489,14 +489,14 @@ const DirectorReviewView = ({ reviewId }) => {
                           className="px-4 py-2 rounded-lg font-medium bg-green-600 text-white hover:bg-green-700 transition flex items-center gap-2"
                         >
                           <CheckCircle className="w-4 h-4" />
-                          Approve
+                          I will attend
                         </button>
                         <button
                           onClick={() => submitApproval(meeting.id, 'rejected')}
                           className="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition flex items-center gap-2"
                         >
                           <XCircle className="w-4 h-4" />
-                          Reject
+                          Cannot attend
                         </button>
                         <button
                           onClick={() => {

@@ -762,10 +762,10 @@ const MeetingAgent = () => {
     alert('Review URL copied to clipboard!');
   };
 
-  // Refresh approvals from database
+  // Refresh director attendance from database
   const refreshApprovals = async () => {
     if (!currentReviewId) {
-      alert('No active review. Please share for review first.');
+      alert('No active review. Please share for director review first.');
       return;
     }
 
@@ -800,10 +800,10 @@ const MeetingAgent = () => {
         });
       });
 
-      alert('Approvals refreshed successfully!');
+      alert('Director attendance updated successfully!');
     } catch (error) {
-      console.error('Error refreshing approvals:', error);
-      alert('Failed to refresh approvals. Make sure the server is running.');
+      console.error('Error refreshing attendance:', error);
+      alert('Failed to refresh attendance. Make sure the server is running.');
     }
   };
 
@@ -1093,10 +1093,10 @@ const MeetingAgent = () => {
                 <button
                   onClick={refreshApprovals}
                   className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                  title="Refresh approval status from directors"
+                  title="Check latest director availability responses"
                 >
                   <RefreshCw className="w-5 h-5" />
-                  Refresh Approvals
+                  Refresh Director Attendance
                 </button>
               )}
               <button
@@ -1197,6 +1197,19 @@ const MeetingAgent = () => {
                           <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getTypeBadgeColor(meeting.programType)}`}>
                             {meeting.programType} {meeting.programYear}
                           </span>
+                          {meeting.approvals && meeting.approvals.length > 0 && (
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                              meeting.approvedCount === 2 ? 'bg-green-100 text-green-800' :
+                              meeting.approvedCount === 1 ? 'bg-yellow-100 text-yellow-800' :
+                              meeting.rejectedCount === 2 ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {meeting.approvedCount === 2 ? '✓ 2/2 directors' :
+                               meeting.approvedCount === 1 ? '✓ 1/2 directors' :
+                               meeting.rejectedCount === 2 ? '✗ 0/2 directors' :
+                               `? ${meeting.approvals.length}/2 responded`}
+                            </span>
+                          )}
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
