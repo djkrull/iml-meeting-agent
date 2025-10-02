@@ -59,17 +59,14 @@ router.get('/:id', async (req, res) => {
       let overallStatus = 'pending';
       if (rejectedCount > 0) {
         overallStatus = 'rejected';
-      } else if (approvedCount >= meeting.requires_directors) {
-        overallStatus = 'approved';
       } else if (approvedCount > 0) {
-        overallStatus = 'partially-approved';
+        overallStatus = 'approved';
       }
 
       return {
         ...meeting,
         overallStatus,
-        approvedCount,
-        requiredCount: meeting.requires_directors
+        approvedCount
       };
     });
 
@@ -146,11 +143,9 @@ router.get('/:id/status', async (req, res) => {
 
       if (rejectedCount > 0) {
         summary.rejected++;
-      } else if (approvedCount >= meeting.requires_directors) {
+      } else if (approvedCount > 0) {
         summary.approved++;
         summary.readyForExport++;
-      } else if (approvedCount > 0) {
-        summary.partiallyApproved++;
       } else {
         summary.pending++;
       }

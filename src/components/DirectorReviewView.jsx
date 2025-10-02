@@ -156,9 +156,7 @@ const DirectorReviewView = ({ reviewId }) => {
           <div className="bg-indigo-50 p-4 rounded-lg">
             <p className="text-sm text-indigo-800">
               <strong>Note:</strong> You can see other directors' approvals in real-time.
-              Meetings marked in green require {" "}
-              <span className="font-semibold">1 director</span>, while others may require{" "}
-              <span className="font-semibold">both directors</span>.
+              Review each meeting and approve, reject, or add comments as needed.
             </p>
           </div>
         </div>
@@ -180,9 +178,6 @@ const DirectorReviewView = ({ reviewId }) => {
                       <h3 className="text-xl font-semibold text-gray-800">{meeting.type}</h3>
                       <span className="text-sm bg-gray-200 px-3 py-1 rounded-full">
                         {meeting.program_name}
-                      </span>
-                      <span className="text-xs text-gray-600">
-                        Requires {meeting.requires_directors} director{meeting.requires_directors > 1 ? 's' : ''}
                       </span>
                     </div>
 

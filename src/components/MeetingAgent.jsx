@@ -681,27 +681,12 @@ const MeetingAgent = () => {
     }
 
     try {
-      // Add requiresDirectors to each meeting based on type
-      const meetingsWithRequirements = meetings.map(m => {
-        // Determine how many directors are needed
-        // Important meetings like "Program Start Meeting" might need both
-        let requiresDirectors = 1;
-        if (m.type.includes('Program Start') || m.type.includes('Evaluation')) {
-          requiresDirectors = 2;
-        }
-
-        return {
-          ...m,
-          requiresDirectors
-        };
-      });
-
       const response = await fetch(`${API_URL}/api/reviews`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           createdBy: 'admin',
-          meetings: meetingsWithRequirements
+          meetings: meetings
         })
       });
 
