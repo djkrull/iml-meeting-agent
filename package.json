@@ -4,14 +4,21 @@
   "description": "Institut Mittag-Leffler Meeting Coordination Agent",
   "private": true,
   "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "lucide-react": "^0.263.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-router-dom": "^7.9.3",
     "react-scripts": "5.0.1",
-    "lucide-react": "^0.263.1",
+    "sqlite3": "^5.1.7",
+    "uuid": "^13.0.0",
     "xlsx": "^0.18.5"
   },
   "scripts": {
     "start": "react-scripts start",
+    "server": "node server/index.js",
+    "dev": "concurrently \"npm run server\" \"npm start\"",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
@@ -32,5 +39,8 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

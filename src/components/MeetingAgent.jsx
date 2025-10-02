@@ -1,12 +1,23 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy } from 'lucide-react';
 import * as XLSX from 'xlsx';
+
 
 const MeetingAgent = () => {
   const [programs, setPrograms] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [filters, setFilters] = useState({
+    'Spring Program': true,
+    'Fall Program': true,
+    'Kleindagarna': true,
+    'Summer Conference': true
+  });
+  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [reviewUrl, setReviewUrl] = useState(null);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // Debug: Component loaded
   console.log('MeetingAgent component loaded');
@@ -156,9 +167,8 @@ const MeetingAgent = () => {
     ]
   };
 
-  // Load Excel file
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
+  // Process file (shared between upload and drop)
+  const processFile = async (file) => {
     if (!file) {
       console.log('No file selected');
       return;
@@ -290,6 +300,44 @@ const MeetingAgent = () => {
       alert(`Error loading Excel file: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Load Excel file from input
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    await processFile(file);
+  };
+
+  // Handle drag over
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(true);
+  };
+
+  // Handle drag leave
+  const handleDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+  };
+
+  // Handle file drop
+  const handleDrop = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+
+    const files = event.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      // Check if it's an Excel file
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        await processFile(file);
+      } else {
+        alert('Please upload an Excel file (.xlsx or .xls)');
+      }
     }
   };
 
@@ -538,6 +586,15 @@ const MeetingAgent = () => {
     ));
   };
 
+  // Approve all meetings
+  const approveAll = () => {
+    setMeetings(meetings.map(m => ({
+      ...m,
+      approved: true,
+      status: 'approved'
+    })));
+  };
+
   // Mark as scheduled
   const markScheduled = (meetingId) => {
     setMeetings(meetings.map(m =>
@@ -545,6 +602,47 @@ const MeetingAgent = () => {
         ? { ...m, status: 'scheduled' }
         : m
     ));
+  };
+
+  // Toggle already scheduled status
+  const toggleAlreadyScheduled = (meetingId) => {
+    setMeetings(meetings.map(m =>
+      m.id === meetingId
+        ? {
+            ...m,
+            status: m.status === 'already-scheduled' ? 'pending' : 'already-scheduled',
+            approved: m.status === 'already-scheduled' ? false : m.approved
+          }
+        : m
+    ));
+  };
+
+  // Update meeting date
+  const updateMeetingDate = (meetingId, newDate) => {
+    setMeetings(meetings.map(m =>
+      m.id === meetingId
+        ? { ...m, date: new Date(newDate) }
+        : m
+    ));
+  };
+
+  // Update meeting time
+  const updateMeetingTime = (meetingId, newTime) => {
+    setMeetings(meetings.map(m =>
+      m.id === meetingId
+        ? { ...m, time: newTime }
+        : m
+    ));
+  };
+
+  // Format date for input field (YYYY-MM-DD)
+  const formatDateForInput = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   // Export to Excel for Outlook import
@@ -574,12 +672,162 @@ const MeetingAgent = () => {
     XLSX.writeFile(wb, `IML_Meetings_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
+  // Share for review
+  const shareForReview = async () => {
+    if (meetings.length === 0) {
+      alert('No meetings to share');
+      return;
+    }
+
+    try {
+      // Add requiresDirectors to each meeting based on type
+      const meetingsWithRequirements = meetings.map(m => {
+        // Determine how many directors are needed
+        // Important meetings like "Program Start Meeting" might need both
+        let requiresDirectors = 1;
+        if (m.type.includes('Program Start') || m.type.includes('Evaluation')) {
+          requiresDirectors = 2;
+        }
+
+        return {
+          ...m,
+          requiresDirectors
+        };
+      });
+
+      const response = await fetch('http://localhost:3001/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          createdBy: 'admin',
+          meetings: meetingsWithRequirements
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const fullUrl = `${window.location.origin}/review/${data.reviewId}`;
+        setReviewUrl(fullUrl);
+        setShowShareModal(true);
+      } else {
+        alert('Failed to create review');
+      }
+    } catch (error) {
+      console.error('Error sharing for review:', error);
+      alert('Failed to share for review. Make sure the server is running.');
+    }
+  };
+
+  const copyReviewUrl = () => {
+    navigator.clipboard.writeText(reviewUrl);
+    alert('Review URL copied to clipboard!');
+  };
+
+  // Export to ICS (iCalendar) format for Outlook
+  const exportToICS = () => {
+    const approvedMeetings = meetings.filter(m => m.approved || m.status === 'scheduled');
+
+    if (approvedMeetings.length === 0) {
+      alert('No approved meetings to export');
+      return;
+    }
+
+    // Helper function to format date/time for ICS
+    const formatICSDateTime = (date, time) => {
+      const [hours, minutes] = time.split(':');
+      const dt = new Date(date);
+      dt.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+      // Format as YYYYMMDDTHHMMSS
+      const year = dt.getFullYear();
+      const month = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      const hour = String(dt.getHours()).padStart(2, '0');
+      const minute = String(dt.getMinutes()).padStart(2, '0');
+
+      return `${year}${month}${day}T${hour}${minute}00`;
+    };
+
+    // Helper function to calculate end time
+    const calculateEndTime = (startDateTime, durationMinutes) => {
+      const dt = new Date(startDateTime.slice(0, 4),
+                         parseInt(startDateTime.slice(4, 6)) - 1,
+                         startDateTime.slice(6, 8),
+                         startDateTime.slice(9, 11),
+                         startDateTime.slice(11, 13));
+      dt.setMinutes(dt.getMinutes() + durationMinutes);
+
+      const year = dt.getFullYear();
+      const month = String(dt.getMonth() + 1).padStart(2, '0');
+      const day = String(dt.getDate()).padStart(2, '0');
+      const hour = String(dt.getHours()).padStart(2, '0');
+      const minute = String(dt.getMinutes()).padStart(2, '0');
+
+      return `${year}${month}${day}T${hour}${minute}00`;
+    };
+
+    // Build ICS file content
+    let icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//IML Meeting Agent//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:IML Meetings',
+      'X-WR-TIMEZONE:Europe/Stockholm'
+    ];
+
+    approvedMeetings.forEach((meeting, index) => {
+      const startDateTime = formatICSDateTime(meeting.date, meeting.time);
+      const endDateTime = calculateEndTime(startDateTime, meeting.duration);
+      const timestamp = formatICSDateTime(new Date(), '12:00');
+
+      icsContent.push('BEGIN:VEVENT');
+      icsContent.push(`UID:iml-meeting-${meeting.id}-${Date.now()}@institutmittagleffler.se`);
+      icsContent.push(`DTSTAMP:${timestamp}`);
+      icsContent.push(`DTSTART:${startDateTime}`);
+      icsContent.push(`DTEND:${endDateTime}`);
+      icsContent.push(`SUMMARY:${meeting.type} - ${meeting.programName}`);
+      icsContent.push(`DESCRIPTION:${meeting.description}\\n\\nParticipants: ${meeting.participants.join(', ')}`);
+      icsContent.push(`LOCATION:Institut Mittag-Leffler`);
+      icsContent.push(`CATEGORIES:${meeting.programType}`);
+      icsContent.push(`STATUS:CONFIRMED`);
+      icsContent.push('END:VEVENT');
+    });
+
+    icsContent.push('END:VCALENDAR');
+
+    // Create and download the file
+    const icsBlob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(icsBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `IML_Meetings_${new Date().toISOString().split('T')[0]}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Toggle filter
+  const toggleFilter = (type) => {
+    setFilters(prev => ({
+      ...prev,
+      [type]: !prev[type]
+    }));
+  };
+
+  // Filter meetings based on selected filters
+  const filteredMeetings = meetings.filter(m => filters[m.programType]);
+
   // Statistics
   const stats = {
-    total: meetings.length,
-    approved: meetings.filter(m => m.approved).length,
-    scheduled: meetings.filter(m => m.status === 'scheduled').length,
-    pending: meetings.filter(m => m.status === 'pending' && !m.approved).length
+    total: filteredMeetings.length,
+    approved: filteredMeetings.filter(m => m.approved).length,
+    scheduled: filteredMeetings.filter(m => m.status === 'scheduled').length,
+    pending: filteredMeetings.filter(m => m.status === 'pending' && !m.approved).length,
+    alreadyScheduled: filteredMeetings.filter(m => m.status === 'already-scheduled').length
   };
 
   return (
@@ -600,7 +848,16 @@ const MeetingAgent = () => {
           </div>
 
           {/* File Upload */}
-          <div className="border-2 border-dashed border-indigo-300 rounded-lg p-6 bg-indigo-50">
+          <div
+            className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+              isDragging
+                ? 'border-indigo-500 bg-indigo-100'
+                : 'border-indigo-300 bg-indigo-50'
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             <div className="flex flex-col items-center justify-center gap-4">
               <div className="flex items-center">
                 <Upload className="w-6 h-6 text-indigo-600 mr-3" />
@@ -608,20 +865,26 @@ const MeetingAgent = () => {
                   {selectedFile || 'Upload Program Schedule (Excel)'}
                 </span>
               </div>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={(e) => {
-                  console.log('File input onChange triggered', e.target.files);
-                  handleFileUpload(e);
-                }}
-                className="block w-full text-sm text-gray-500
-                  file:mr-4 file:py-2 file:px-4
-                  file:rounded-full file:border-0
-                  file:text-sm file:font-semibold
-                  file:bg-indigo-50 file:text-indigo-700
-                  hover:file:bg-indigo-100 cursor-pointer"
-              />
+              <p className="text-sm text-indigo-600 mb-2">
+                {isDragging ? 'Drop file here...' : 'Drag and drop your Excel file here'}
+              </p>
+              <div className="w-full">
+                <label htmlFor="file-upload" className="cursor-pointer">
+                  <div className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold text-center transition">
+                    Click to Browse Files
+                  </div>
+                </label>
+                <input
+                  id="file-upload"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(e) => {
+                    console.log('File input onChange triggered', e.target.files);
+                    handleFileUpload(e);
+                  }}
+                  className="hidden"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -636,7 +899,7 @@ const MeetingAgent = () => {
         {!loading && programs.length > 0 && (
           <>
             {/* Statistics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -664,6 +927,16 @@ const MeetingAgent = () => {
                     <p className="text-3xl font-bold text-indigo-600">{stats.scheduled}</p>
                   </div>
                   <Clock className="w-12 h-12 text-indigo-500" />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-500 text-sm">Already Scheduled</p>
+                    <p className="text-3xl font-bold text-gray-600">{stats.alreadyScheduled}</p>
+                  </div>
+                  <CheckCircle className="w-12 h-12 text-gray-500" />
                 </div>
               </div>
 
@@ -704,27 +977,115 @@ const MeetingAgent = () => {
               </div>
             </div>
 
-            {/* Export Button */}
-            <div className="mb-8 text-right">
+            {/* Filters */}
+            <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">Filter by Program Type</h2>
+              <div className="flex flex-wrap gap-4">
+                {Object.keys(filters).map(type => (
+                  <label key={type} className="flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters[type]}
+                      onChange={() => toggleFilter(type)}
+                      className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className={`ml-2 px-3 py-1 rounded-full text-sm font-semibold ${getTypeBadgeColor(type)}`}>
+                      {type}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="mb-8 flex justify-end gap-4 flex-wrap">
+              <button
+                onClick={shareForReview}
+                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+              >
+                <Share2 className="w-5 h-5" />
+                Share for Director Review
+              </button>
+              <button
+                onClick={approveAll}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+              >
+                <CheckCircle className="w-5 h-5" />
+                Approve All
+              </button>
+              <button
+                onClick={exportToICS}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+              >
+                <CalendarDays className="w-5 h-5" />
+                Export to Outlook (.ics)
+              </button>
               <button
                 onClick={exportToExcel}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 ml-auto transition"
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <Download className="w-5 h-5" />
-                Export Approved to Excel
+                Export to Excel
               </button>
             </div>
+
+            {/* Share Modal */}
+            {showShareModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full mx-4">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-4">Review Link Created!</h2>
+                  <p className="text-gray-600 mb-4">
+                    Share this link with Directors to review and approve the meetings:
+                  </p>
+                  <div className="bg-gray-100 p-4 rounded-lg mb-4 flex items-center justify-between">
+                    <code className="text-sm text-gray-800 break-all flex-1">{reviewUrl}</code>
+                    <button
+                      onClick={copyReviewUrl}
+                      className="ml-4 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition flex-shrink-0"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copy
+                    </button>
+                  </div>
+                  <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                    <p className="text-sm text-blue-800">
+                      <strong>How it works:</strong>
+                    </p>
+                    <ul className="text-sm text-blue-700 mt-2 list-disc list-inside">
+                      <li>Directors will see all meetings and can approve/reject them</li>
+                      <li>They can see each other's decisions in real-time</li>
+                      <li>Some meetings require 1 director, others require 2</li>
+                      <li>You'll see their decisions reflected here</li>
+                    </ul>
+                  </div>
+                  <button
+                    onClick={() => setShowShareModal(false)}
+                    className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Meetings Timeline */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <h2 className="text-2xl font-bold text-gray-800 mb-6">Meeting Timeline</h2>
 
+              {filteredMeetings.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No meetings match the selected filters</p>
+                </div>
+              )}
+
               <div className="space-y-4">
-                {meetings.map(meeting => (
+                {filteredMeetings.map(meeting => (
                   <div
                     key={meeting.id}
                     className={`border-l-4 p-4 rounded-r-lg transition ${
-                      meeting.status === 'scheduled'
+                      meeting.status === 'already-scheduled'
+                        ? 'border-gray-400 bg-gray-100 opacity-75'
+                        : meeting.status === 'scheduled'
                         ? 'border-indigo-600 bg-indigo-50'
                         : meeting.approved
                         ? 'border-green-500 bg-green-50'
@@ -747,18 +1108,56 @@ const MeetingAgent = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
                           <div className="flex items-center text-gray-700">
-                            <Calendar className="w-4 h-4 mr-2" />
-                            <span className="text-sm">{formatDate(meeting.date)}</span>
+                            <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
+                            {editingMeeting === meeting.id ? (
+                              <input
+                                type="date"
+                                value={formatDateForInput(meeting.date)}
+                                onChange={(e) => updateMeetingDate(meeting.id, e.target.value)}
+                                className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm">{formatDate(meeting.date)}</span>
+                                <button
+                                  onClick={() => setEditingMeeting(meeting.id)}
+                                  className="text-indigo-600 hover:text-indigo-800"
+                                  title="Edit date/time"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center text-gray-700">
-                            <Clock className="w-4 h-4 mr-2" />
-                            <span className="text-sm">{meeting.time} ({meeting.duration} min)</span>
+                            <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
+                            {editingMeeting === meeting.id ? (
+                              <input
+                                type="time"
+                                value={meeting.time}
+                                onChange={(e) => updateMeetingTime(meeting.id, e.target.value)}
+                                className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                            ) : (
+                              <span className="text-sm">{meeting.time} ({meeting.duration} min)</span>
+                            )}
                           </div>
                           <div className="flex items-center text-gray-700">
                             <Users className="w-4 h-4 mr-2" />
                             <span className="text-sm">{meeting.participants.length} participants</span>
                           </div>
                         </div>
+
+                        {editingMeeting === meeting.id && (
+                          <div className="mb-3">
+                            <button
+                              onClick={() => setEditingMeeting(null)}
+                              className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 transition"
+                            >
+                              Done Editing
+                            </button>
+                          </div>
+                        )}
 
                         <p className="text-sm text-gray-600 mb-2">{meeting.description}</p>
 
@@ -768,24 +1167,47 @@ const MeetingAgent = () => {
                       </div>
 
                       <div className="flex flex-col gap-2 ml-4">
-                        <button
-                          onClick={() => toggleApproval(meeting.id)}
-                          className={`px-4 py-2 rounded-lg font-medium transition ${
-                            meeting.approved
-                              ? 'bg-green-600 text-white hover:bg-green-700'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          {meeting.approved ? 'Approved' : 'Approve'}
-                        </button>
+                        {meeting.status === 'already-scheduled' ? (
+                          <>
+                            <div className="px-4 py-2 rounded-lg font-medium bg-gray-400 text-white text-center">
+                              Already Scheduled
+                            </div>
+                            <button
+                              onClick={() => toggleAlreadyScheduled(meeting.id)}
+                              className="px-4 py-2 rounded-lg font-medium bg-orange-500 text-white hover:bg-orange-600 transition text-sm"
+                            >
+                              Undo
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => toggleApproval(meeting.id)}
+                              className={`px-4 py-2 rounded-lg font-medium transition ${
+                                meeting.approved
+                                  ? 'bg-green-600 text-white hover:bg-green-700'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              {meeting.approved ? 'Approved' : 'Approve'}
+                            </button>
 
-                        {meeting.approved && meeting.status !== 'scheduled' && (
-                          <button
-                            onClick={() => markScheduled(meeting.id)}
-                            className="px-4 py-2 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
-                          >
-                            Mark Scheduled
-                          </button>
+                            {meeting.approved && meeting.status !== 'scheduled' && (
+                              <button
+                                onClick={() => markScheduled(meeting.id)}
+                                className="px-4 py-2 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
+                              >
+                                Mark Scheduled
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => toggleAlreadyScheduled(meeting.id)}
+                              className="px-4 py-2 rounded-lg font-medium bg-gray-500 text-white hover:bg-gray-600 transition text-sm"
+                            >
+                              Already Scheduled
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
