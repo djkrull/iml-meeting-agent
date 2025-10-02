@@ -197,7 +197,7 @@ const DirectorReviewView = ({ reviewId }) => {
                       </div>
                       <div className="flex items-center text-gray-700">
                         <Users className="w-4 h-4 mr-2" />
-                        <span className="text-sm">{JSON.parse(meeting.participants).length} participants</span>
+                        <span className="text-sm">{Array.isArray(meeting.participants) ? meeting.participants.length : 0} participants</span>
                       </div>
                     </div>
 
