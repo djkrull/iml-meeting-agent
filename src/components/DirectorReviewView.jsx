@@ -252,7 +252,7 @@ const DirectorReviewView = ({ reviewId }) => {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
                       <div className="flex items-center text-gray-700">
                         <Calendar className="w-4 h-4 mr-2" />
                         <span className="text-sm">{formatDate(meeting.date)}</span>
@@ -261,11 +261,17 @@ const DirectorReviewView = ({ reviewId }) => {
                         <Clock className="w-4 h-4 mr-2" />
                         <span className="text-sm">{meeting.time} ({meeting.duration} min)</span>
                       </div>
-                      <div className="flex items-center text-gray-700">
-                        <Users className="w-4 h-4 mr-2" />
-                        <span className="text-sm">{Array.isArray(meeting.participants) ? meeting.participants.length : 0} participants</span>
-                      </div>
                     </div>
+
+                    {/* Participants */}
+                    {Array.isArray(meeting.participants) && meeting.participants.length > 0 && (
+                      <div className="flex items-start text-gray-700 mb-3">
+                        <Users className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
+                        <span className="text-sm">
+                          <strong>Participants:</strong> {meeting.participants.join(', ')}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Description with Edit capability */}
                     <div className="mb-3">
