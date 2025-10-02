@@ -403,11 +403,12 @@ const MeetingAgent = () => {
       const programMeetings = meetingTypes[program.type] || [];
 
       programMeetings.forEach(meetingType => {
-        // For Summer Conference Introduction and Check-in meetings, only create once for all conferences
-        if (program.type === 'Summer Conference' &&
-            (meetingType.name.includes('Introduction Meeting') || meetingType.name.includes('Check-in Meeting'))) {
+        // For Summer Conference and Kleindagarna Introduction and Check-in meetings, only create once
+        if ((program.type === 'Summer Conference' || program.type === 'Kleindagarna') &&
+            (meetingType.name.includes('Introduction Meeting') || meetingType.name.includes('Check-in Meeting') ||
+             meetingType.name.includes('Check-in meeting'))) {
 
-          const meetingKey = `${meetingType.name}_${meetingType.leadTime}`;
+          const meetingKey = `${program.type}_${meetingType.name}_${meetingType.leadTime}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
             // Calculate date based on earliest summer conference
@@ -421,10 +422,11 @@ const MeetingAgent = () => {
 
             if (meetingDate) {
               summerConferenceMeetings.set(meetingKey, true);
+              const groupName = program.type === 'Kleindagarna' ? 'All Kleindagarna' : 'All Summer Conferences';
               generatedMeetings.push({
                 id: meetingId++,
-                programId: 'all-summer',
-                programName: 'All Summer Conferences',
+                programId: program.type === 'Kleindagarna' ? 'all-kleindagarna' : 'all-summer',
+                programName: groupName,
                 programType: program.type,
                 type: meetingType.name,
                 date: meetingDate,

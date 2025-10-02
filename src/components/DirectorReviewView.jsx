@@ -216,7 +216,7 @@ const DirectorReviewView = ({ reviewId }) => {
 
         {/* Meetings List */}
         <div className="space-y-4">
-          {review.meetings?.map((meeting) => {
+          {review.meetings?.filter(meeting => meeting.program_type !== 'Kleindagarna').map((meeting) => {
             const myApproval = getMyApproval(meeting);
             const otherApprovals = getOtherApprovals(meeting);
 
