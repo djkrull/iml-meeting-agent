@@ -481,10 +481,7 @@ const DirectorReviewView = ({ reviewId }) => {
                           Approve
                         </button>
                         <button
-                          onClick={() => {
-                            const comment = prompt('Optional comment:');
-                            submitApproval(meeting.id, 'rejected', comment || '');
-                          }}
+                          onClick={() => submitApproval(meeting.id, 'rejected')}
                           className="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition flex items-center gap-2"
                         >
                           <XCircle className="w-4 h-4" />
@@ -492,15 +489,17 @@ const DirectorReviewView = ({ reviewId }) => {
                         </button>
                         <button
                           onClick={() => {
-                            const comment = prompt('Add a comment or suggest changes:');
+                            const comment = prompt('Add a comment:');
                             if (comment) {
-                              submitApproval(meeting.id, 'pending', comment);
+                              const myApproval = getMyApproval(meeting);
+                              const currentStatus = myApproval ? myApproval.status : 'pending';
+                              submitApproval(meeting.id, currentStatus, comment);
                             }
                           }}
                           className="px-4 py-2 rounded-lg font-medium bg-gray-500 text-white hover:bg-gray-600 transition flex items-center gap-2 text-sm"
                         >
                           <MessageSquare className="w-4 h-4" />
-                          Comment
+                          Add Comment
                         </button>
                       </>
                     )}
