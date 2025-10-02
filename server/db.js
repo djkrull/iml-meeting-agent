@@ -77,6 +77,18 @@ async function initializePostgresDatabase() {
       )
     `);
 
+    // Migration: Add new columns if they don't exist
+    try {
+      await pool.query(`
+        ALTER TABLE meetings
+        ADD COLUMN IF NOT EXISTS program_year INTEGER,
+        ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'
+      `);
+      console.log('PostgreSQL schema migration completed');
+    } catch (migrationError) {
+      console.log('Migration note:', migrationError.message);
+    }
+
     console.log('PostgreSQL tables initialized');
   } catch (error) {
     console.error('Error initializing PostgreSQL:', error);
