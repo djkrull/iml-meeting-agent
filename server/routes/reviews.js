@@ -53,8 +53,12 @@ router.get('/:id', async (req, res) => {
 
     // Calculate approval status for each meeting
     const meetingsWithStatus = review.meetings.map(meeting => {
-      const approvedCount = meeting.approvals.filter(a => a.status === 'approved').length;
-      const rejectedCount = meeting.approvals.filter(a => a.status === 'rejected').length;
+      const approvedCount = meeting.approvals.filter(a =>
+        a.status === 'approved' || a.status === 'accepted'
+      ).length;
+      const rejectedCount = meeting.approvals.filter(a =>
+        a.status === 'rejected' || a.status === 'declined'
+      ).length;
 
       let overallStatus = 'pending';
       if (rejectedCount > 0) {
@@ -116,7 +120,7 @@ router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
       return res.status(400).json({ error: 'Director name is required' });
     }
 
-    if (!['approved', 'rejected', 'pending'].includes(status)) {
+    if (!['approved', 'rejected', 'accepted', 'declined', 'pending'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
@@ -160,8 +164,12 @@ router.get('/:id/status', async (req, res) => {
     };
 
     review.meetings.forEach(meeting => {
-      const approvedCount = meeting.approvals.filter(a => a.status === 'approved').length;
-      const rejectedCount = meeting.approvals.filter(a => a.status === 'rejected').length;
+      const approvedCount = meeting.approvals.filter(a =>
+        a.status === 'approved' || a.status === 'accepted'
+      ).length;
+      const rejectedCount = meeting.approvals.filter(a =>
+        a.status === 'rejected' || a.status === 'declined'
+      ).length;
 
       if (rejectedCount > 0) {
         summary.rejected++;

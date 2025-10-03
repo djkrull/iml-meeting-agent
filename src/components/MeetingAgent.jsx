@@ -784,8 +784,12 @@ const MeetingAgent = () => {
           const dbMeeting = reviewData.meetings.find(m => m.meeting_id === meeting.id);
 
           if (dbMeeting) {
-            const approvedCount = dbMeeting.approvals?.filter(a => a.status === 'approved').length || 0;
-            const rejectedCount = dbMeeting.approvals?.filter(a => a.status === 'rejected').length || 0;
+            const approvedCount = dbMeeting.approvals?.filter(a =>
+              a.status === 'approved' || a.status === 'accepted'
+            ).length || 0;
+            const rejectedCount = dbMeeting.approvals?.filter(a =>
+              a.status === 'rejected' || a.status === 'declined'
+            ).length || 0;
 
             // Update meeting with approval info
             return {
@@ -1304,9 +1308,38 @@ const MeetingAgent = () => {
                           )}
                         </div>
 
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-gray-500 mb-2">
                           <strong>Participants:</strong> {meeting.participants.join(', ')}
                         </div>
+
+                        {/* Director Attendance Details */}
+                        {meeting.approvals && meeting.approvals.length > 0 && (
+                          <div className="bg-blue-50 p-3 rounded-lg">
+                            <p className="text-xs font-semibold text-blue-800 mb-2">Director Attendance:</p>
+                            {meeting.approvals.map((approval, idx) => (
+                              <div key={idx} className="text-xs text-blue-900 mb-1">
+                                <strong>{approval.director_name}:</strong>{' '}
+                                <span className={
+                                  (approval.status === 'accepted' || approval.status === 'approved')
+                                    ? 'text-green-700 font-semibold'
+                                    : (approval.status === 'declined' || approval.status === 'rejected')
+                                    ? 'text-red-700 font-semibold'
+                                    : 'text-gray-600'
+                                }>
+                                  {(approval.status === 'accepted' || approval.status === 'approved') ? 'Attending' :
+                                   (approval.status === 'declined' || approval.status === 'rejected') ? 'Cannot attend' :
+                                   'Pending'}
+                                </span>
+                                {approval.comment && (
+                                  <span className="text-gray-700"> - "{approval.comment}"</span>
+                                )}
+                                {approval.suggested_date && (
+                                  <span className="text-gray-700"> (Suggested: {approval.suggested_date} {approval.suggested_time})</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex flex-col gap-2 ml-4">

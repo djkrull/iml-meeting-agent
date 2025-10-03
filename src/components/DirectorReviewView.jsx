@@ -211,11 +211,30 @@ const DirectorReviewView = ({ reviewId }) => {
   };
 
   const getMyApproval = (meeting) => {
-    return meeting.approvals?.find(a => a.director_name === directorName);
+    // First try exact match
+    let approval = meeting.approvals?.find(a => a.director_name === directorName);
+
+    // If no exact match, try flexible matching (check if core name is included)
+    if (!approval && directorName) {
+      const coreName = directorName.replace(/, (Director|Deputy Director)$/i, '').trim();
+      approval = meeting.approvals?.find(a => {
+        const approvalCoreName = a.director_name.replace(/, (Director|Deputy Director)$/i, '').trim();
+        return approvalCoreName === coreName ||
+               a.director_name.includes(coreName) ||
+               coreName.includes(approvalCoreName);
+      });
+    }
+
+    return approval;
   };
 
   const getOtherApprovals = (meeting) => {
-    return meeting.approvals?.filter(a => a.director_name !== directorName) || [];
+    const myApproval = getMyApproval(meeting);
+    if (!myApproval) {
+      return meeting.approvals || [];
+    }
+    // Filter out the approval that matches the current director
+    return meeting.approvals?.filter(a => a.id !== myApproval.id) || [];
   };
 
   const getStatusColor = (status) => {
@@ -365,7 +384,11 @@ const DirectorReviewView = ({ reviewId }) => {
             return (
               <div
                 key={meeting.id}
-                className={`bg-white rounded-lg shadow-lg border-l-4 ${getStatusColor(meeting.overallStatus)} p-6`}
+                className={`rounded-lg shadow-lg border-l-4 p-6 ${
+                  changingDecisionId === meeting.id
+                    ? 'bg-white border-gray-300'
+                    : getStatusColor(meeting.overallStatus)
+                }`}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
@@ -445,15 +468,19 @@ const DirectorReviewView = ({ reviewId }) => {
                         <p className="text-sm font-semibold text-blue-800 mb-2">Other Director's Response:</p>
                         {otherApprovals.map((approval, idx) => (
                           <div key={idx} className="flex items-center gap-2 text-sm">
-                            {approval.status === 'approved' ? (
+                            {(approval.status === 'accepted' || approval.status === 'approved') ? (
                               <CheckCircle className="w-4 h-4 text-green-600" />
-                            ) : approval.status === 'rejected' ? (
+                            ) : (approval.status === 'declined' || approval.status === 'rejected') ? (
                               <XCircle className="w-4 h-4 text-red-600" />
                             ) : (
                               <AlertCircle className="w-4 h-4 text-gray-600" />
                             )}
                             <span className="text-blue-900">
-                              {approval.director_name}: <strong>{approval.status}</strong>
+                              {approval.director_name}: <strong>{
+                                (approval.status === 'accepted' || approval.status === 'approved') ? 'Attending' :
+                                (approval.status === 'declined' || approval.status === 'rejected') ? 'Not available' :
+                                'Pending'
+                              }</strong>
                               {approval.comment && ` - "${approval.comment}"`}
                             </span>
                           </div>
@@ -467,13 +494,14 @@ const DirectorReviewView = ({ reviewId }) => {
                     {myApproval && changingDecisionId !== meeting.id ? (
                       <div className="text-center">
                         <div className={`px-4 py-2 rounded-lg font-medium ${
-                          myApproval.status === 'approved'
+                          myApproval.status === 'accepted' || myApproval.status === 'approved'
                             ? 'bg-green-600 text-white'
-                            : myApproval.status === 'rejected'
+                            : myApproval.status === 'declined' || myApproval.status === 'rejected'
                             ? 'bg-red-600 text-white'
                             : 'bg-gray-400 text-white'
                         }`}>
-                          {myApproval.status === 'approved' ? 'Attending' : myApproval.status === 'rejected' ? 'Not available' : 'Pending'}
+                          {(myApproval.status === 'accepted' || myApproval.status === 'approved') ? 'Attending' :
+                           (myApproval.status === 'declined' || myApproval.status === 'rejected') ? 'Not available' : 'Pending'}
                         </div>
                         <button
                           onClick={() => setChangingDecisionId(meeting.id)}
@@ -485,14 +513,14 @@ const DirectorReviewView = ({ reviewId }) => {
                     ) : (
                       <>
                         <button
-                          onClick={() => submitApproval(meeting.id, 'approved')}
+                          onClick={() => submitApproval(meeting.id, 'accepted')}
                           className="px-4 py-2 rounded-lg font-medium bg-green-600 text-white hover:bg-green-700 transition flex items-center gap-2"
                         >
                           <CheckCircle className="w-4 h-4" />
                           I will attend
                         </button>
                         <button
-                          onClick={() => submitApproval(meeting.id, 'rejected')}
+                          onClick={() => submitApproval(meeting.id, 'declined')}
                           className="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition flex items-center gap-2"
                         >
                           <XCircle className="w-4 h-4" />
