@@ -188,4 +188,28 @@ router.get('/:id/status', async (req, res) => {
   }
 });
 
+// Clear all reviews from a specific director
+router.post('/:id/clear-director', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { directorName } = req.body;
+
+    if (!directorName) {
+      return res.status(400).json({ error: 'Director name is required' });
+    }
+
+    console.log(`Clearing all reviews from director: ${directorName} for review ${id}`);
+
+    await dbHelpers.clearDirectorApprovals(id, directorName);
+
+    res.json({
+      success: true,
+      message: `All reviews from ${directorName} have been cleared`
+    });
+  } catch (error) {
+    console.error('Error clearing director reviews:', error);
+    res.status(500).json({ error: 'Failed to clear director reviews' });
+  }
+});
+
 module.exports = router;

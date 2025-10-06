@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -28,6 +28,8 @@ const MeetingAgent = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [reviewUrl, setReviewUrl] = useState(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [reviewDirectors, setReviewDirectors] = useState([]);
   const [currentReviewId, setCurrentReviewId] = useState(() => {
     return localStorage.getItem('iml-current-review-id') || null;
   });
@@ -74,7 +76,7 @@ const MeetingAgent = () => {
         leadTime: -180, // 6 months before (same day, right after organizers)
         weekday: 5, // Friday
         time: '10:30',
-        participants: ['Junior Fellows', 'Admin Team'],
+        participants: ['Junior Fellows', 'Admin Team', 'Directors'],
         duration: 30,
         description: 'Junior fellow orientation and support'
       },
@@ -140,7 +142,7 @@ const MeetingAgent = () => {
         leadTime: -240, // 8 months before
         weekday: 5, // Friday
         time: '10:00',
-        participants: ['Conference Organizer Group 1', 'Admin Team'],
+        participants: ['Conference Organizer Group 1', 'Admin Team', 'Directors'],
         duration: 30,
         description: 'Initial planning for first conference group'
       },
@@ -149,7 +151,7 @@ const MeetingAgent = () => {
         leadTime: -240, // Same day as Group 1, right after
         weekday: 5, // Friday
         time: '15:00',
-        participants: ['Conference Organizer Group 2', 'Admin Team'],
+        participants: ['Conference Organizer Group 2', 'Admin Team', 'Directors'],
         duration: 30,
         description: 'Initial planning for second conference group'
       },
@@ -453,6 +455,7 @@ const MeetingAgent = () => {
                 programName: groupName,
                 programType: program.type,
                 programYear: program.startDate.getFullYear(),
+                programOrganizer: program.organizer,
                 type: meetingType.name,
                 date: meetingDate,
                 time: meetingType.time || '14:00',
@@ -481,6 +484,7 @@ const MeetingAgent = () => {
                 programName: program.name,
                 programType: program.type,
                 programYear: program.startDate.getFullYear(),
+                programOrganizer: program.organizer,
                 type: meetingType.name,
                 date: new Date(currentDate),
                 time: meetingType.time || '09:00',
@@ -511,6 +515,7 @@ const MeetingAgent = () => {
               programName: program.name,
               programType: program.type,
               programYear: program.startDate.getFullYear(),
+              programOrganizer: program.organizer,
               type: meetingType.name,
               date: meetingDate,
               time: meetingType.time || '14:00',
@@ -811,6 +816,65 @@ const MeetingAgent = () => {
     }
   };
 
+  // Open clear review modal
+  const openClearModal = async () => {
+    if (!currentReviewId) {
+      alert('No active review. Please share for director review first.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch review');
+      }
+
+      const reviewData = await response.json();
+
+      // Extract unique directors from all approvals
+      const directorsSet = new Set();
+      reviewData.meetings.forEach(meeting => {
+        meeting.approvals?.forEach(approval => {
+          directorsSet.add(approval.director_name);
+        });
+      });
+
+      setReviewDirectors(Array.from(directorsSet));
+      setShowClearModal(true);
+    } catch (error) {
+      console.error('Error fetching review data:', error);
+      alert('Failed to fetch review data. Make sure the server is running.');
+    }
+  };
+
+  // Clear reviews for a specific director
+  const clearDirectorReviews = async (directorName) => {
+    if (!window.confirm(`Are you sure you want to clear all reviews from ${directorName}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}/clear-director`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directorName })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to clear director reviews');
+      }
+
+      // Refresh the director list and meetings
+      await openClearModal();
+      await refreshApprovals();
+
+      alert(`All reviews from ${directorName} have been cleared.`);
+    } catch (error) {
+      console.error('Error clearing director reviews:', error);
+      alert('Failed to clear director reviews. Make sure the server is running.');
+    }
+  };
+
   // Export to ICS (iCalendar) format for Outlook
   const exportToICS = () => {
     const approvedMeetings = meetings.filter(m => m.approved || m.status === 'scheduled');
@@ -1094,14 +1158,24 @@ const MeetingAgent = () => {
                 Share for Director Review
               </button>
               {currentReviewId && (
-                <button
-                  onClick={refreshApprovals}
-                  className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                  title="Check latest director availability responses"
-                >
-                  <RefreshCw className="w-5 h-5" />
-                  Refresh Director Attendance
-                </button>
+                <>
+                  <button
+                    onClick={refreshApprovals}
+                    className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    title="Check latest director availability responses"
+                  >
+                    <RefreshCw className="w-5 h-5" />
+                    Refresh Director Attendance
+                  </button>
+                  <button
+                    onClick={openClearModal}
+                    className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    title="Clear reviews from specific directors"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                    Clear Reviews
+                  </button>
+                </>
               )}
               <button
                 onClick={approveAll}
@@ -1157,6 +1231,46 @@ const MeetingAgent = () => {
                   </div>
                   <button
                     onClick={() => setShowShareModal(false)}
+                    className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Clear Reviews Modal */}
+            {showClearModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full mx-4">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-4">Clear Director Reviews</h2>
+                  <p className="text-gray-600 mb-4">
+                    Select a director to clear all their reviews:
+                  </p>
+
+                  {reviewDirectors.length === 0 ? (
+                    <div className="bg-gray-50 p-8 rounded-lg text-center">
+                      <p className="text-gray-600">No director reviews found.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 mb-6">
+                      {reviewDirectors.map((director) => (
+                        <div key={director} className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+                          <span className="text-gray-800 font-medium">{director}</span>
+                          <button
+                            onClick={() => clearDirectorReviews(director)}
+                            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Clear Reviews
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setShowClearModal(false)}
                     className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition"
                   >
                     Close

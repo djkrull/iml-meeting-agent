@@ -52,6 +52,7 @@ async function initializePostgresDatabase() {
         program_name TEXT NOT NULL,
         program_type TEXT NOT NULL,
         program_year INTEGER,
+        program_organizer TEXT,
         date TIMESTAMP NOT NULL,
         time TEXT NOT NULL,
         duration INTEGER NOT NULL,
@@ -82,7 +83,8 @@ async function initializePostgresDatabase() {
       await pool.query(`
         ALTER TABLE meetings
         ADD COLUMN IF NOT EXISTS program_year INTEGER,
-        ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'
+        ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending',
+        ADD COLUMN IF NOT EXISTS program_organizer TEXT
       `);
       console.log('PostgreSQL schema migration completed');
     } catch (migrationError) {
@@ -117,6 +119,7 @@ function initializeSQLiteDatabase() {
         program_name TEXT NOT NULL,
         program_type TEXT NOT NULL,
         program_year INTEGER,
+        program_organizer TEXT,
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         duration INTEGER NOT NULL,
@@ -187,8 +190,8 @@ const dbHelpers = {
       if (USE_POSTGRES) {
         try {
           const result = await pool.query(
-            `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, program_year, date, time, duration, participants, description, status, requires_directors)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+            `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, program_year, program_organizer, date, time, duration, participants, description, status, requires_directors)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
             [
               reviewId,
               meeting.id,
@@ -196,6 +199,7 @@ const dbHelpers = {
               meeting.programName,
               meeting.programType,
               meeting.programYear || null,
+              meeting.programOrganizer || null,
               dateStr,
               meeting.time,
               meeting.duration,
@@ -211,8 +215,8 @@ const dbHelpers = {
         }
       } else {
         db.run(
-          `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, program_year, date, time, duration, participants, description, status, requires_directors)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO meetings (review_id, meeting_id, type, program_name, program_type, program_year, program_organizer, date, time, duration, participants, description, status, requires_directors)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             reviewId,
             meeting.id,
@@ -220,6 +224,7 @@ const dbHelpers = {
             meeting.programName,
             meeting.programType,
             meeting.programYear || null,
+            meeting.programOrganizer || null,
             dateStr,
             meeting.time,
             meeting.duration,
@@ -392,6 +397,58 @@ const dbHelpers = {
             else resolve({ id: meetingId, changes: this.changes });
           }
         );
+      }
+    });
+  },
+
+  // Clear all approvals from a specific director for a review
+  clearDirectorApprovals: (reviewId, directorName) => {
+    return new Promise(async (resolve, reject) => {
+      if (USE_POSTGRES) {
+        try {
+          // Get all meetings for this review
+          const meetingsResult = await pool.query(
+            'SELECT id FROM meetings WHERE review_id = $1',
+            [reviewId]
+          );
+
+          if (meetingsResult.rows.length === 0) {
+            return resolve({ deletedCount: 0 });
+          }
+
+          const meetingIds = meetingsResult.rows.map(m => m.id);
+
+          // Delete all approvals from this director for these meetings
+          const result = await pool.query(
+            'DELETE FROM approvals WHERE meeting_id = ANY($1) AND director_name = $2',
+            [meetingIds, directorName]
+          );
+
+          resolve({ deletedCount: result.rowCount });
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        // Get all meetings for this review
+        db.all('SELECT id FROM meetings WHERE review_id = ?', [reviewId], (err, meetings) => {
+          if (err) {
+            reject(err);
+          } else if (meetings.length === 0) {
+            resolve({ deletedCount: 0 });
+          } else {
+            const meetingIds = meetings.map(m => m.id);
+            const placeholders = meetingIds.map(() => '?').join(',');
+
+            db.run(
+              `DELETE FROM approvals WHERE meeting_id IN (${placeholders}) AND director_name = ?`,
+              [...meetingIds, directorName],
+              function(err) {
+                if (err) reject(err);
+                else resolve({ deletedCount: this.changes });
+              }
+            );
+          }
+        });
       }
     });
   }

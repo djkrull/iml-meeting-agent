@@ -413,6 +413,16 @@ const DirectorReviewView = ({ reviewId }) => {
                       </div>
                     </div>
 
+                    {/* Organizer */}
+                    {meeting.program_organizer && (
+                      <div className="flex items-start text-gray-700 mb-2">
+                        <Users className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
+                        <span className="text-sm">
+                          <strong>Organizer:</strong> {meeting.program_organizer}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Participants */}
                     {Array.isArray(meeting.participants) && meeting.participants.length > 0 && (
                       <div className="flex items-start text-gray-700 mb-3">
