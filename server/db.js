@@ -100,7 +100,7 @@ async function initializePostgresDatabase() {
       CREATE TABLE IF NOT EXISTS program_meetings (
         id SERIAL PRIMARY KEY,
         meeting_id INTEGER NOT NULL,
-        program_id INTEGER,
+        program_id TEXT,
         program_name TEXT NOT NULL,
         program_type TEXT NOT NULL,
         program_year INTEGER,
@@ -129,6 +129,17 @@ async function initializePostgresDatabase() {
       console.log('PostgreSQL schema migration completed');
     } catch (migrationError) {
       console.log('Migration note:', migrationError.message);
+    }
+
+    // Migration: Change program_id from INTEGER to TEXT in existing table
+    try {
+      await pool.query(`
+        ALTER TABLE program_meetings
+        ALTER COLUMN program_id TYPE TEXT
+      `);
+      console.log('Changed program_id to TEXT type');
+    } catch (migrationError) {
+      console.log('Migration note (program_id):', migrationError.message);
     }
 
     console.log('PostgreSQL tables initialized');
@@ -206,7 +217,7 @@ function initializeSQLiteDatabase() {
       CREATE TABLE IF NOT EXISTS program_meetings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         meeting_id INTEGER NOT NULL,
-        program_id INTEGER,
+        program_id TEXT,
         program_name TEXT NOT NULL,
         program_type TEXT NOT NULL,
         program_year INTEGER,
