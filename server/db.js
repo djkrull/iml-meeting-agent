@@ -12,10 +12,11 @@ if (USE_POSTGRES) {
   // PostgreSQL for production (Railway)
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    ssl: { rejectUnauthorized: false }
   });
 
   console.log('Using PostgreSQL database');
+  console.log('Database host:', process.env.DATABASE_URL?.split('@')[1]?.split('/')[0] || 'configured');
   initializePostgresDatabase();
 } else {
   // SQLite for local development
@@ -75,6 +76,45 @@ async function initializePostgresDatabase() {
         suggested_time TEXT,
         timestamp TIMESTAMP NOT NULL,
         FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+      )
+    `);
+
+    // Tables for persistent program and meeting storage
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS programs (
+        id SERIAL PRIMARY KEY,
+        program_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        start_date TIMESTAMP NOT NULL,
+        end_date TIMESTAMP,
+        organizer TEXT,
+        status TEXT,
+        year INTEGER,
+        created_at TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP NOT NULL
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS program_meetings (
+        id SERIAL PRIMARY KEY,
+        meeting_id INTEGER NOT NULL,
+        program_id INTEGER,
+        program_name TEXT NOT NULL,
+        program_type TEXT NOT NULL,
+        program_year INTEGER,
+        program_organizer TEXT,
+        type TEXT NOT NULL,
+        date TIMESTAMP NOT NULL,
+        time TEXT NOT NULL,
+        duration INTEGER NOT NULL,
+        participants JSONB NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT 'pending',
+        approved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP NOT NULL
       )
     `);
 
@@ -142,6 +182,45 @@ function initializeSQLiteDatabase() {
         suggested_time TEXT,
         timestamp TEXT NOT NULL,
         FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+      )
+    `);
+
+    // Tables for persistent program and meeting storage
+    db.run(`
+      CREATE TABLE IF NOT EXISTS programs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        program_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT,
+        organizer TEXT,
+        status TEXT,
+        year INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS program_meetings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        meeting_id INTEGER NOT NULL,
+        program_id INTEGER,
+        program_name TEXT NOT NULL,
+        program_type TEXT NOT NULL,
+        program_year INTEGER,
+        program_organizer TEXT,
+        type TEXT NOT NULL,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
+        duration INTEGER NOT NULL,
+        participants TEXT NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT 'pending',
+        approved INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       )
     `);
 
@@ -449,6 +528,199 @@ const dbHelpers = {
             );
           }
         });
+      }
+    });
+  },
+
+  // Save programs and meetings
+  savePrograms: (programs, meetings) => {
+    return new Promise(async (resolve, reject) => {
+      const now = new Date().toISOString();
+
+      try {
+        if (USE_POSTGRES) {
+          // Delete existing data first
+          await pool.query('DELETE FROM program_meetings');
+          await pool.query('DELETE FROM programs');
+
+          // Insert programs
+          for (const program of programs) {
+            const startDate = typeof program.startDate === 'string'
+              ? program.startDate
+              : program.startDate.toISOString();
+            const endDate = program.endDate
+              ? (typeof program.endDate === 'string' ? program.endDate : program.endDate.toISOString())
+              : null;
+
+            await pool.query(
+              `INSERT INTO programs (program_id, name, type, start_date, end_date, organizer, status, year, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+              [program.id, program.name, program.type, startDate, endDate,
+               program.organizer, program.status, program.year, now, now]
+            );
+          }
+
+          // Insert meetings
+          for (const meeting of meetings) {
+            const meetingDate = typeof meeting.date === 'string'
+              ? meeting.date
+              : meeting.date.toISOString();
+
+            await pool.query(
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+              [meeting.id, meeting.programId, meeting.programName, meeting.programType,
+               meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
+               meeting.time, meeting.duration, JSON.stringify(meeting.participants),
+               meeting.description, meeting.status, meeting.approved || false, now, now]
+            );
+          }
+
+          resolve({ programs: programs.length, meetings: meetings.length });
+        } else {
+          // SQLite
+          db.serialize(() => {
+            db.run('DELETE FROM program_meetings');
+            db.run('DELETE FROM programs', (err) => {
+              if (err) return reject(err);
+
+              // Insert programs
+              const programStmt = db.prepare(
+                `INSERT INTO programs (program_id, name, type, start_date, end_date, organizer, status, year, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              );
+
+              programs.forEach(program => {
+                const startDate = typeof program.startDate === 'string'
+                  ? program.startDate
+                  : program.startDate.toISOString();
+                const endDate = program.endDate
+                  ? (typeof program.endDate === 'string' ? program.endDate : program.endDate.toISOString())
+                  : null;
+
+                programStmt.run(
+                  program.id, program.name, program.type, startDate, endDate,
+                  program.organizer, program.status, program.year, now, now
+                );
+              });
+
+              programStmt.finalize();
+
+              // Insert meetings
+              const meetingStmt = db.prepare(
+                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              );
+
+              meetings.forEach(meeting => {
+                const meetingDate = typeof meeting.date === 'string'
+                  ? meeting.date
+                  : meeting.date.toISOString();
+
+                meetingStmt.run(
+                  meeting.id, meeting.programId, meeting.programName, meeting.programType,
+                  meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
+                  meeting.time, meeting.duration, JSON.stringify(meeting.participants),
+                  meeting.description, meeting.status, meeting.approved ? 1 : 0, now, now
+                );
+              });
+
+              meetingStmt.finalize((err) => {
+                if (err) reject(err);
+                else resolve({ programs: programs.length, meetings: meetings.length });
+              });
+            });
+          });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Get all programs and meetings
+  getPrograms: () => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (USE_POSTGRES) {
+          const programsResult = await pool.query('SELECT * FROM programs ORDER BY start_date');
+          const meetingsResult = await pool.query('SELECT * FROM program_meetings ORDER BY date');
+
+          const programs = programsResult.rows.map(p => ({
+            id: p.program_id,
+            name: p.name,
+            type: p.type,
+            startDate: p.start_date,
+            endDate: p.end_date,
+            organizer: p.organizer,
+            status: p.status,
+            year: p.year
+          }));
+
+          const meetings = meetingsResult.rows.map(m => ({
+            id: m.meeting_id,
+            programId: m.program_id,
+            programName: m.program_name,
+            programType: m.program_type,
+            programYear: m.program_year,
+            programOrganizer: m.program_organizer,
+            type: m.type,
+            date: m.date,
+            time: m.time,
+            duration: m.duration,
+            participants: typeof m.participants === 'string' ? JSON.parse(m.participants) : m.participants,
+            description: m.description,
+            status: m.status,
+            approved: m.approved
+          }));
+
+          resolve({ programs, meetings });
+        } else {
+          // SQLite
+          db.all('SELECT * FROM programs ORDER BY start_date', (err, programRows) => {
+            if (err) {
+              reject(err);
+            } else {
+              db.all('SELECT * FROM program_meetings ORDER BY date', (err, meetingRows) => {
+                if (err) {
+                  reject(err);
+                } else {
+                  const programs = programRows.map(p => ({
+                    id: p.program_id,
+                    name: p.name,
+                    type: p.type,
+                    startDate: p.start_date,
+                    endDate: p.end_date,
+                    organizer: p.organizer,
+                    status: p.status,
+                    year: p.year
+                  }));
+
+                  const meetings = meetingRows.map(m => ({
+                    id: m.meeting_id,
+                    programId: m.program_id,
+                    programName: m.program_name,
+                    programType: m.program_type,
+                    programYear: m.program_year,
+                    programOrganizer: m.program_organizer,
+                    type: m.type,
+                    date: m.date,
+                    time: m.time,
+                    duration: m.duration,
+                    participants: JSON.parse(m.participants),
+                    description: m.description,
+                    status: m.status,
+                    approved: m.approved === 1
+                  }));
+
+                  resolve({ programs, meetings });
+                }
+              });
+            }
+          });
+        }
+      } catch (err) {
+        reject(err);
       }
     });
   }

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const reviewRoutes = require('./routes/reviews');
+const programRoutes = require('./routes/programs');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -12,6 +13,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/programs', programRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

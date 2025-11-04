@@ -2,19 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const MeetingAgent = () => {
-  // Load saved data from localStorage on initial mount
-  const [programs, setPrograms] = useState(() => {
-    const saved = localStorage.getItem('iml-programs');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [meetings, setMeetings] = useState(() => {
-    const saved = localStorage.getItem('iml-meetings');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // State management
+  const [programs, setPrograms] = useState([]);
+  const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [editedDescription, setEditedDescription] = useState('');
@@ -34,19 +29,87 @@ const MeetingAgent = () => {
     return localStorage.getItem('iml-current-review-id') || null;
   });
 
-  // Save programs to localStorage whenever they change
+  // Load programs and meetings from backend on component mount
   useEffect(() => {
-    if (programs.length > 0) {
-      localStorage.setItem('iml-programs', JSON.stringify(programs));
-    }
-  }, [programs]);
+    const loadFromBackend = async () => {
+      if (initialLoadComplete) return;
 
-  // Save meetings to localStorage whenever they change
+      setLoading(true);
+      try {
+        console.log('Loading programs and meetings from backend...');
+        const response = await fetch(`${API_URL}/api/programs`);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Loaded from backend:', data);
+
+          if (data.programs && data.programs.length > 0) {
+            // Parse dates back to Date objects
+            const programsWithDates = data.programs.map(p => ({
+              ...p,
+              startDate: new Date(p.startDate),
+              endDate: p.endDate ? new Date(p.endDate) : null
+            }));
+
+            const meetingsWithDates = data.meetings.map(m => ({
+              ...m,
+              date: new Date(m.date)
+            }));
+
+            setPrograms(programsWithDates);
+            setMeetings(meetingsWithDates);
+            console.log(`Loaded ${programsWithDates.length} programs and ${meetingsWithDates.length} meetings`);
+          } else {
+            console.log('No programs found in backend');
+          }
+        } else {
+          console.log('Backend returned error:', response.status);
+        }
+      } catch (error) {
+        console.error('Error loading from backend:', error);
+        console.log('Backend may not be running yet');
+      } finally {
+        setLoading(false);
+        setInitialLoadComplete(true);
+      }
+    };
+
+    loadFromBackend();
+  }, []); // Only run on mount
+
+  // Save programs and meetings to backend whenever they change
   useEffect(() => {
-    if (meetings.length > 0) {
-      localStorage.setItem('iml-meetings', JSON.stringify(meetings));
-    }
-  }, [meetings]);
+    const saveToBackend = async () => {
+      if (!initialLoadComplete) return; // Don't save during initial load
+      if (programs.length === 0 && meetings.length === 0) return;
+
+      try {
+        console.log('Saving to backend...');
+        const response = await fetch(`${API_URL}/api/programs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            programs,
+            meetings
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Saved to backend:', data);
+        } else {
+          console.error('Failed to save to backend:', response.status);
+        }
+      } catch (error) {
+        console.error('Error saving to backend:', error);
+        // Fall back to localStorage if backend fails
+        localStorage.setItem('iml-programs', JSON.stringify(programs));
+        localStorage.setItem('iml-meetings', JSON.stringify(meetings));
+      }
+    };
+
+    saveToBackend();
+  }, [programs, meetings, initialLoadComplete]);
 
   // Debug: Component loaded
   console.log('MeetingAgent component loaded');
@@ -818,28 +881,47 @@ const MeetingAgent = () => {
 
   // Open clear review modal
   const openClearModal = async () => {
+    console.log('openClearModal called, currentReviewId:', currentReviewId);
+
     if (!currentReviewId) {
       alert('No active review. Please share for director review first.');
       return;
     }
 
     try {
+      // First, try to get directors from local meetings state
+      const localDirectorsSet = new Set();
+      console.log('Checking local meetings:', meetings.length);
+      meetings.forEach(meeting => {
+        console.log('Meeting has approvals?', meeting.approvals, 'Length:', meeting.approvals?.length);
+        meeting.approvals?.forEach(approval => {
+          console.log('Approval object:', approval);
+          localDirectorsSet.add(approval.director_name);
+        });
+      });
+      console.log('Local directors found:', Array.from(localDirectorsSet));
+
+      // Also fetch from server to ensure we have all directors
       const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}`);
       if (!response.ok) {
         throw new Error('Failed to fetch review');
       }
 
       const reviewData = await response.json();
+      console.log('Server review data:', reviewData);
 
       // Extract unique directors from all approvals
-      const directorsSet = new Set();
-      reviewData.meetings.forEach(meeting => {
+      const directorsSet = new Set(localDirectorsSet); // Start with local directors
+      reviewData.meetings?.forEach(meeting => {
         meeting.approvals?.forEach(approval => {
           directorsSet.add(approval.director_name);
         });
       });
 
-      setReviewDirectors(Array.from(directorsSet));
+      const directors = Array.from(directorsSet).filter(d => d); // Filter out null/undefined
+      console.log('Final directors list:', directors);
+
+      setReviewDirectors(directors);
       setShowClearModal(true);
     } catch (error) {
       console.error('Error fetching review data:', error);
