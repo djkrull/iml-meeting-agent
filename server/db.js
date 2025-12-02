@@ -587,6 +587,51 @@ const dbHelpers = {
     });
   },
 
+  // Get meeting by characteristics (program_name + type) with approvals
+  getMeetingByCharacteristics: (reviewId, programName, meetingType) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (USE_POSTGRES) {
+          const meetingResult = await pool.query(
+            'SELECT * FROM meetings WHERE review_id = $1 AND program_name = $2 AND type = $3',
+            [reviewId, programName, meetingType]
+          );
+
+          if (meetingResult.rows.length === 0) {
+            return resolve(null);
+          }
+
+          const meeting = meetingResult.rows[0];
+          const approvalsResult = await pool.query('SELECT * FROM approvals WHERE meeting_id = $1', [meeting.id]);
+
+          resolve({
+            ...meeting,
+            approvals: approvalsResult.rows
+          });
+        } else {
+          db.get(
+            'SELECT * FROM meetings WHERE review_id = ? AND program_name = ? AND type = ?',
+            [reviewId, programName, meetingType],
+            (err, meeting) => {
+              if (err) return reject(err);
+              if (!meeting) return resolve(null);
+
+              db.all('SELECT * FROM approvals WHERE meeting_id = ?', [meeting.id], (err, approvals) => {
+                if (err) return reject(err);
+                resolve({
+                  ...meeting,
+                  approvals: approvals || []
+                });
+              });
+            }
+          );
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
   // Update meeting in review by characteristics (program_name + type)
   updateMeetingByCharacteristics: (reviewId, programName, meetingType, updates) => {
     return new Promise(async (resolve, reject) => {

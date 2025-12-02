@@ -114,7 +114,7 @@ router.patch('/:id/meetings/:meetingId', async (req, res) => {
 router.post('/:id/sync-meeting', async (req, res) => {
   try {
     const { id: reviewId } = req.params;
-    const { meetingId, time, date, description, programName, meetingType } = req.body;
+    const { meetingId, time, date, description, programName, meetingType, checkOnly } = req.body;
 
     console.log(`[SYNC] Syncing meeting in review ${reviewId}`);
     console.log(`[SYNC] Program: ${programName}, Type: ${meetingType}`);
@@ -127,6 +127,16 @@ router.post('/:id/sync-meeting', async (req, res) => {
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    // If checkOnly, just check for approvals without updating
+    if (checkOnly) {
+      const meetingInfo = await dbHelpers.getMeetingByCharacteristics(reviewId, programName, meetingType);
+      return res.json({
+        success: true,
+        hasApprovals: meetingInfo && meetingInfo.approvals && meetingInfo.approvals.length > 0,
+        approvalCount: meetingInfo?.approvals?.length || 0
+      });
     }
 
     let result;

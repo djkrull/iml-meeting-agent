@@ -1054,11 +1054,58 @@ const MeetingAgent = () => {
       return;
     }
 
-    if (!window.confirm('This will update all meeting times and dates in the director view to match your current admin view. Continue?')) {
-      return;
-    }
-
     try {
+      // Step 1: Check which meetings have existing approvals
+      console.log('Checking for existing approvals...');
+      const meetingsWithApprovals = [];
+
+      for (const meeting of meetings) {
+        try {
+          const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              programName: meeting.programName,
+              meetingType: meeting.type,
+              checkOnly: true,
+              time: meeting.time,
+              date: meeting.date.toISOString(),
+              description: meeting.description
+            })
+          });
+
+          const result = await response.json();
+          if (result.hasApprovals) {
+            meetingsWithApprovals.push({
+              name: meeting.type,
+              program: meeting.programName,
+              count: result.approvalCount
+            });
+          }
+        } catch (err) {
+          console.error(`Failed to check meeting: ${meeting.type}`, err);
+        }
+      }
+
+      // Step 2: If meetings have approvals, show warning
+      if (meetingsWithApprovals.length > 0) {
+        const meetingsList = meetingsWithApprovals
+          .map(m => `  • ${m.name} (${m.program}) - ${m.count} director response(s)`)
+          .join('\n');
+
+        const warningMessage = `⚠️ WARNING: The following meetings have existing director responses:\n\n${meetingsList}\n\nChanging times will keep their old approvals, which may no longer be valid for the new times.\n\nRecommendation: Consider using "Clear Reviews" to reset director responses before syncing.\n\nContinue anyway?`;
+
+        if (!window.confirm(warningMessage)) {
+          return;
+        }
+      } else {
+        // No approvals, just ask for basic confirmation
+        if (!window.confirm('This will update all meeting times and dates in the director view to match your current admin view. Continue?')) {
+          return;
+        }
+      }
+
+      // Step 3: Proceed with sync
       let successCount = 0;
       let errorCount = 0;
       let updatedCount = 0;
