@@ -224,10 +224,10 @@ const MeetingAgent = () => {
         description: 'Progress check and adjustments'
       },
       {
-        name: 'Evaluation meeting',
+        name: 'Evaluation meeting/lunch',
         leadTime: 'end', // Special: April 20+ for Spring, week before end for Fall
         weekday: 5, // Friday
-        participants: ['Program Organizers', 'Admin Team', 'Directors'],
+        participants: ['Program Organizers', 'Directors'],
         duration: 30,
         description: 'Program evaluation and feedback'
       }
