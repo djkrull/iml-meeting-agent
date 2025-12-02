@@ -281,29 +281,79 @@ const dbHelpers = {
     });
   },
 
-  // Update existing review with new meetings
+  // Update existing review with new meetings (preserves approvals)
   updateReview: (reviewId, meetings) => {
     return new Promise(async (resolve, reject) => {
       if (USE_POSTGRES) {
         try {
-          // Delete all existing meetings for this review
-          // This will also cascade delete approvals
-          await pool.query('DELETE FROM meetings WHERE review_id = $1', [reviewId]);
-          console.log(`[UPDATE REVIEW] Deleted existing meetings for review ${reviewId}`);
+          console.log(`[UPDATE REVIEW] Updating review ${reviewId} with ${meetings.length} meetings (preserving approvals)`);
 
-          // Add all new meetings
+          // Get existing meetings in this review
+          const existingMeetings = await pool.query(
+            'SELECT id, program_name, type FROM meetings WHERE review_id = $1',
+            [reviewId]
+          );
+
+          const existingMap = new Map();
+          existingMeetings.rows.forEach(m => {
+            const key = `${m.program_name}|||${m.type}`;
+            existingMap.set(key, m.id);
+          });
+
+          const updatedCount = { updated: 0, inserted: 0 };
+
+          // Update or insert each meeting
           for (const meeting of meetings) {
-            await dbHelpers.addMeeting(reviewId, meeting);
+            const key = `${meeting.programName}|||${meeting.type}`;
+            const existingId = existingMap.get(key);
+
+            const dateStr = typeof meeting.date === 'string'
+              ? meeting.date
+              : meeting.date.toISOString();
+
+            if (existingId) {
+              // Update existing meeting (preserves approvals)
+              await pool.query(
+                `UPDATE meetings
+                 SET date = $1, time = $2, description = $3, duration = $4, participants = $5
+                 WHERE id = $6`,
+                [dateStr, meeting.time, meeting.description, meeting.duration,
+                 JSON.stringify(meeting.participants), existingId]
+              );
+              updatedCount.updated++;
+              existingMap.delete(key); // Mark as processed
+            } else {
+              // Insert new meeting
+              await dbHelpers.addMeeting(reviewId, meeting);
+              updatedCount.inserted++;
+            }
           }
 
-          // Update the review's updated_at timestamp
+          // Delete meetings that no longer exist in admin data
+          // (only if they have no approvals - don't delete meetings directors responded to)
+          for (const [key, meetingId] of existingMap) {
+            const approvalCount = await pool.query(
+              'SELECT COUNT(*) as count FROM approvals WHERE meeting_id = $1',
+              [meetingId]
+            );
+
+            if (approvalCount.rows[0].count === 0) {
+              await pool.query('DELETE FROM meetings WHERE id = $1', [meetingId]);
+              console.log(`[UPDATE REVIEW] Deleted obsolete meeting (no approvals): ${key}`);
+            } else {
+              console.log(`[UPDATE REVIEW] Kept meeting with approvals: ${key}`);
+            }
+          }
+
+          // Update the review's timestamp
           await pool.query(
             'UPDATE reviews SET created_at = $1 WHERE id = $2',
             [new Date().toISOString(), reviewId]
           );
 
-          console.log(`[UPDATE REVIEW] Updated review ${reviewId} with ${meetings.length} meetings`);
-          resolve({ id: reviewId, updated: true });
+          console.log(`[UPDATE REVIEW] Updated ${updatedCount.updated} meetings, inserted ${updatedCount.inserted} new meetings`);
+          console.log(`[UPDATE REVIEW] ✅ All approvals preserved!`);
+          resolve({ id: reviewId, updated: true, ...updatedCount });
         } catch (err) {
           console.error('[UPDATE REVIEW] Error:', err);
           reject(err);
