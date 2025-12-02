@@ -23,3 +23,11 @@ yarn-error.log*
 # Excel files (optional - uncomment if you don't want to commit data files)
 # *.xlsx
 # *.xls
+
+# Database files
+*.db
+*.db-journal
+
+# Test/utility scripts with credentials
+server/test-db.js
+server/init-railway-db.js
