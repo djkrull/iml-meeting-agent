@@ -1447,6 +1447,16 @@ const MeetingAgent = () => {
     );
   };
 
+  // Check if meeting involves directors
+  const involvesDirectors = (meeting) => {
+    const directorKeywords = ['director', 'directors'];
+    const participantsStr = meeting.participants?.join(' ').toLowerCase() || '';
+    const typeStr = meeting.type.toLowerCase();
+    return directorKeywords.some(keyword =>
+      participantsStr.includes(keyword) || typeStr.includes(keyword)
+    );
+  };
+
   // Auto-resolve conflicts by moving meetings to next available time
   const autoResolveConflicts = () => {
     if (conflicts.length === 0) {
@@ -1456,7 +1466,7 @@ const MeetingAgent = () => {
 
     const conflictCount = conflicts.reduce((sum, c) => sum + c.meetings.length - 1, 0);
 
-    if (!window.confirm(`This will automatically move ${conflictCount} conflicting meetings to the next available time slots.\n\nConflicts found:\n${conflicts.map(c => `  • ${c.date} at ${c.time} (${c.meetings.length} meetings)`).join('\n')}\n\nContinue?`)) {
+    if (!window.confirm(`This will automatically move ${conflictCount} conflicting meetings to the next available time slots.\n\nRules:\n  • Directors meetings → Fridays only\n  • Other meetings → Keep same day if possible\n\nConflicts found:\n${conflicts.map(c => `  • ${c.date} at ${c.time} (${c.meetings.length} meetings)`).join('\n')}\n\nContinue?`)) {
       return;
     }
 
@@ -1473,31 +1483,47 @@ const MeetingAgent = () => {
         const index = updatedMeetings.findIndex(m => m.id === meetingToMove.id);
         if (index === -1) return;
 
-        // Find next available 30-minute slot on the same day
+        const hasDirectors = involvesDirectors(meetingToMove);
         const currentDate = new Date(meetingToMove.date);
-        const dateStr = currentDate.toISOString().split('T')[0];
+        const originalDay = currentDate.getDay(); // 0=Sunday, 5=Friday
 
         // Parse current time
         const [hours, minutes] = meetingToMove.time.split(':').map(Number);
         let newHours = hours;
         let newMinutes = minutes;
+        let testDate = new Date(currentDate);
 
         // Try times in 30-minute increments
         let found = false;
-        for (let attempt = 0; attempt < 48; attempt++) { // Try up to 24 hours
+        for (let attempt = 0; attempt < 200; attempt++) { // Try many slots
           newMinutes += 30;
           if (newMinutes >= 60) {
             newMinutes = 0;
             newHours++;
           }
           if (newHours >= 24) {
-            newHours = 0;
-            currentDate.setDate(currentDate.getDate() + 1); // Move to next day
+            newHours = 9; // Reset to 9:00 AM
+            newMinutes = 0;
+            testDate.setDate(testDate.getDate() + 1);
+          }
+
+          const testDay = testDate.getDay();
+
+          // Apply scheduling rules
+          if (hasDirectors && testDay !== 5) {
+            // Directors meetings MUST be on Friday (5)
+            // Skip this time and continue looking
+            continue;
+          }
+
+          // Prefer to keep meetings on same day of week (unless it's a director meeting)
+          if (!hasDirectors && attempt < 30 && testDay !== originalDay) {
+            // First 30 attempts, try to stay on same day of week
+            continue;
           }
 
           const testTime = `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
-          const testDateStr = currentDate.toISOString().split('T')[0];
-          const testKey = `${testDateStr}|${testTime}`;
+          const testDateStr = testDate.toISOString().split('T')[0];
 
           // Check if this time is available
           const isOccupied = updatedMeetings.some(m => {
@@ -1509,7 +1535,7 @@ const MeetingAgent = () => {
             // Found available slot
             updatedMeetings[index] = {
               ...updatedMeetings[index],
-              date: new Date(currentDate),
+              date: new Date(testDate),
               time: testTime
             };
             movedCount++;
@@ -1525,7 +1551,7 @@ const MeetingAgent = () => {
     });
 
     setMeetings(updatedMeetings);
-    alert(`✅ Resolved conflicts!\n\n${movedCount} meetings moved to available time slots.`);
+    alert(`✅ Resolved conflicts!\n\n${movedCount} meetings moved to available time slots.\n\nRules applied:\n  • Directors meetings placed on Fridays\n  • Other meetings kept on same day when possible`);
   };
 
   return (
