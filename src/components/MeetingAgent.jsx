@@ -77,20 +77,19 @@ const MeetingAgent = () => {
     loadFromBackend();
   }, []); // Only run on mount
 
-  // Auto-load director approvals if review exists
+  // Auto-refresh director approvals on page load and every 30 seconds
   useEffect(() => {
     const autoLoadApprovals = async () => {
       if (!initialLoadComplete || !currentReviewId || meetings.length === 0) return;
 
-      // Check if meetings already have approval data
-      const hasApprovals = meetings.some(m => m.approvals && m.approvals.length > 0);
-      if (hasApprovals) return; // Already loaded
-
-      console.log('Auto-loading director approvals for review:', currentReviewId);
+      console.log('[AUTO-REFRESH] Loading director approvals from review:', currentReviewId);
 
       try {
         const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}`);
-        if (!response.ok) return;
+        if (!response.ok) {
+          console.log('[AUTO-REFRESH] Failed to fetch review:', response.status);
+          return;
+        }
 
         const review = await response.json();
         if (!review.meetings) return;
@@ -123,13 +122,20 @@ const MeetingAgent = () => {
           });
         });
 
-        console.log('Auto-loaded director approvals successfully');
+        console.log('[AUTO-REFRESH] Director approvals loaded successfully');
       } catch (error) {
-        console.error('Error auto-loading approvals:', error);
+        console.error('[AUTO-REFRESH] Error loading approvals:', error);
       }
     };
 
+    // Load immediately on mount
     autoLoadApprovals();
+
+    // Set up interval to refresh every 30 seconds
+    const intervalId = setInterval(autoLoadApprovals, 30000);
+
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
   }, [initialLoadComplete, currentReviewId, meetings.length]);
 
   // Save programs and meetings to backend whenever they change
