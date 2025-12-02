@@ -77,6 +77,61 @@ const MeetingAgent = () => {
     loadFromBackend();
   }, []); // Only run on mount
 
+  // Auto-load director approvals if review exists
+  useEffect(() => {
+    const autoLoadApprovals = async () => {
+      if (!initialLoadComplete || !currentReviewId || meetings.length === 0) return;
+
+      // Check if meetings already have approval data
+      const hasApprovals = meetings.some(m => m.approvals && m.approvals.length > 0);
+      if (hasApprovals) return; // Already loaded
+
+      console.log('Auto-loading director approvals for review:', currentReviewId);
+
+      try {
+        const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}`);
+        if (!response.ok) return;
+
+        const review = await response.json();
+        if (!review.meetings) return;
+
+        // Merge approval data with existing meetings
+        setMeetings(currentMeetings => {
+          return currentMeetings.map(meeting => {
+            const dbMeeting = review.meetings.find(m =>
+              m.program_name === meeting.programName && m.type === meeting.type
+            );
+
+            if (dbMeeting) {
+              const approvedCount = dbMeeting.approvals?.filter(a =>
+                a.status === 'approved' || a.status === 'accepted'
+              ).length || 0;
+
+              const rejectedCount = dbMeeting.approvals?.filter(a =>
+                a.status === 'rejected' || a.status === 'declined'
+              ).length || 0;
+
+              return {
+                ...meeting,
+                approvedCount,
+                rejectedCount,
+                approvals: dbMeeting.approvals || [],
+                approved: approvedCount > 0 && rejectedCount === 0
+              };
+            }
+            return meeting;
+          });
+        });
+
+        console.log('Auto-loaded director approvals successfully');
+      } catch (error) {
+        console.error('Error auto-loading approvals:', error);
+      }
+    };
+
+    autoLoadApprovals();
+  }, [initialLoadComplete, currentReviewId, meetings.length]);
+
   // Save programs and meetings to backend whenever they change
   useEffect(() => {
     const saveToBackend = async () => {
