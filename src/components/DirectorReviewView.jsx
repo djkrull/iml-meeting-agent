@@ -373,6 +373,14 @@ const DirectorReviewView = ({ reviewId }) => {
             // Filter out already scheduled meetings
             if (meeting.status === 'already-scheduled') return false;
             return true;
+          }).sort((a, b) => {
+            // Sort by date first, then by time
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            const dateDiff = dateA - dateB;
+            if (dateDiff !== 0) return dateDiff;
+            // If same date, compare times
+            return a.time.localeCompare(b.time);
           }).map((meeting) => {
             const myApproval = getMyApproval(meeting);
             const otherApprovals = getOtherApprovals(meeting);

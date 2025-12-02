@@ -343,7 +343,7 @@ const dbHelpers = {
           }
           const review = reviewResult.rows[0];
 
-          const meetingsResult = await pool.query('SELECT * FROM meetings WHERE review_id = $1', [reviewId]);
+          const meetingsResult = await pool.query('SELECT * FROM meetings WHERE review_id = $1 ORDER BY date, time', [reviewId]);
 
           const meetingsWithApprovals = await Promise.all(meetingsResult.rows.map(async (meeting) => {
             const approvalsResult = await pool.query('SELECT * FROM approvals WHERE meeting_id = $1', [meeting.id]);
@@ -368,7 +368,7 @@ const dbHelpers = {
           } else if (!review) {
             reject(new Error('Review not found'));
           } else {
-            db.all('SELECT * FROM meetings WHERE review_id = ?', [reviewId], (err, meetings) => {
+            db.all('SELECT * FROM meetings WHERE review_id = ? ORDER BY date, time', [reviewId], (err, meetings) => {
               if (err) {
                 reject(err);
               } else {

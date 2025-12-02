@@ -593,12 +593,19 @@ const MeetingAgent = () => {
       });
     });
 
-    // Filter out past meetings and sort by date
+    // Filter out past meetings and sort by date and time
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const futureMeetings = generatedMeetings.filter(m => m.date >= today);
-    futureMeetings.sort((a, b) => a.date - b.date);
+    futureMeetings.sort((a, b) => {
+      // First compare dates
+      const dateDiff = a.date - b.date;
+      if (dateDiff !== 0) return dateDiff;
+
+      // If same date, compare times
+      return a.time.localeCompare(b.time);
+    });
 
     console.log(`Generated ${generatedMeetings.length} total meetings, kept ${futureMeetings.length} future meetings`);
     setMeetings(futureMeetings);
