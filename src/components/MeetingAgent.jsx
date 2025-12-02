@@ -999,8 +999,8 @@ const MeetingAgent = () => {
     }
   };
 
-  // Remove duplicates from local admin view
-  const removeMyDuplicates = () => {
+  // Remove duplicates from local admin view AND backend
+  const removeMyDuplicates = async () => {
     const seen = new Map();
     const unique = [];
 
@@ -1013,8 +1013,36 @@ const MeetingAgent = () => {
     });
 
     const removed = meetings.length - unique.length;
-    setMeetings(unique);
-    alert(`Removed ${removed} duplicate meetings from your admin view.\n${unique.length} unique meetings remain.`);
+
+    if (removed === 0) {
+      alert('No duplicates found!');
+      return;
+    }
+
+    // Save deduplicated meetings to backend
+    try {
+      const response = await fetch(`${API_URL}/api/programs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          programs: programs,
+          meetings: unique
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Update local state after successful backend save
+        setMeetings(unique);
+        alert(`Removed ${removed} duplicate meetings!\n${unique.length} unique meetings remain.\n\nThe duplicates have been permanently removed from the database.`);
+      } else {
+        alert('Failed to remove duplicates: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error removing duplicates:', error);
+      alert('Failed to remove duplicates. Make sure the server is running.');
+    }
   };
 
   // Remove duplicate meetings from director review
