@@ -1208,6 +1208,42 @@ const MeetingAgent = () => {
     }
   };
 
+  // Clean up corrupted meetings with placeholder names
+  const cleanupCorruptedMeetings = async () => {
+    const corruptedKeywords = ['Title', 'Untitled', 'TODO', 'TBD', 'TBA'];
+
+    const corrupted = meetings.filter(m =>
+      corruptedKeywords.some(keyword =>
+        m.programName === keyword ||
+        m.programName.toLowerCase().includes(keyword.toLowerCase())
+      )
+    );
+
+    if (corrupted.length === 0) {
+      alert('No corrupted meetings found! ✅');
+      return;
+    }
+
+    const corruptedList = corrupted
+      .map(m => `  • ${m.type} - ${m.programName} (${new Date(m.date).toISOString().split('T')[0]} ${m.time})`)
+      .join('\n');
+
+    if (!window.confirm(`Found ${corrupted.length} corrupted meeting(s) with placeholder names:\n\n${corruptedList}\n\nDelete these meetings?`)) {
+      return;
+    }
+
+    // Remove corrupted meetings
+    const cleanMeetings = meetings.filter(m =>
+      !corruptedKeywords.some(keyword =>
+        m.programName === keyword ||
+        m.programName.toLowerCase().includes(keyword.toLowerCase())
+      )
+    );
+
+    setMeetings(cleanMeetings);
+    alert(`✅ Removed ${corrupted.length} corrupted meetings!\n${cleanMeetings.length} clean meetings remain.`);
+  };
+
   // Force reload from database
   const reloadFromDatabase = async () => {
     if (!window.confirm('This will reload all programs and meetings from the database. Any unsaved changes will be lost. Continue?')) {
@@ -1560,8 +1596,14 @@ const MeetingAgent = () => {
                           </div>
                           <div className="ml-7 space-y-2">
                             {conflict.meetings.map((meeting, mIdx) => (
-                              <div key={mIdx} className="text-sm text-gray-700 bg-red-50 p-2 rounded">
-                                <span className="font-semibold">{meeting.type}</span> - {meeting.programName}
+                              <div key={mIdx} className="text-sm text-gray-700 bg-red-50 p-3 rounded border border-red-200">
+                                <div className="font-semibold">{meeting.type}</div>
+                                <div className="text-gray-600">{meeting.programName}</div>
+                                {meeting.participants && meeting.participants.length > 0 && (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    Participants: {meeting.participants.join(', ')}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -1628,6 +1670,14 @@ const MeetingAgent = () => {
               >
                 <RefreshCw className="w-5 h-5" />
                 Reload from Database
+              </button>
+              <button
+                onClick={cleanupCorruptedMeetings}
+                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                title="Remove meetings with placeholder names like 'Title', 'TBD', etc."
+              >
+                <X className="w-5 h-5" />
+                Clean Corrupted Meetings
               </button>
               <button
                 onClick={removeMyDuplicates}
