@@ -270,6 +270,64 @@ const dbHelpers = {
     });
   },
 
+  // Update existing review with new meetings
+  updateReview: (reviewId, meetings) => {
+    return new Promise(async (resolve, reject) => {
+      if (USE_POSTGRES) {
+        try {
+          // Delete all existing meetings for this review
+          // This will also cascade delete approvals
+          await pool.query('DELETE FROM meetings WHERE review_id = $1', [reviewId]);
+          console.log(`[UPDATE REVIEW] Deleted existing meetings for review ${reviewId}`);
+
+          // Add all new meetings
+          for (const meeting of meetings) {
+            await dbHelpers.addMeeting(reviewId, meeting);
+          }
+
+          // Update the review's updated_at timestamp
+          await pool.query(
+            'UPDATE reviews SET created_at = $1 WHERE id = $2',
+            [new Date().toISOString(), reviewId]
+          );
+
+          console.log(`[UPDATE REVIEW] Updated review ${reviewId} with ${meetings.length} meetings`);
+          resolve({ id: reviewId, updated: true });
+        } catch (err) {
+          console.error('[UPDATE REVIEW] Error:', err);
+          reject(err);
+        }
+      } else {
+        // SQLite version
+        db.serialize(() => {
+          db.run('DELETE FROM meetings WHERE review_id = ?', [reviewId], async (err) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+
+            try {
+              for (const meeting of meetings) {
+                await dbHelpers.addMeeting(reviewId, meeting);
+              }
+
+              db.run(
+                'UPDATE reviews SET created_at = ? WHERE id = ?',
+                [new Date().toISOString(), reviewId],
+                (err) => {
+                  if (err) reject(err);
+                  else resolve({ id: reviewId, updated: true });
+                }
+              );
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+      }
+    });
+  },
+
   // Add meeting to review
   addMeeting: (reviewId, meeting) => {
     return new Promise(async (resolve, reject) => {

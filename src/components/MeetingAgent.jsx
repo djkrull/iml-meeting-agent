@@ -896,14 +896,35 @@ const MeetingAgent = () => {
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          createdBy: 'admin',
-          meetings: meetings
-        })
-      });
+      // Check if we already have a review ID (update existing instead of creating new)
+      const existingReviewId = currentReviewId || localStorage.getItem('iml-current-review-id');
+
+      let response;
+      let isUpdate = false;
+
+      if (existingReviewId) {
+        // Update existing review
+        console.log(`[SHARE] Updating existing review: ${existingReviewId}`);
+        response = await fetch(`${API_URL}/api/reviews/${existingReviewId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            meetings: meetings
+          })
+        });
+        isUpdate = true;
+      } else {
+        // Create new review
+        console.log('[SHARE] Creating new review');
+        response = await fetch(`${API_URL}/api/reviews`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            createdBy: 'admin',
+            meetings: meetings
+          })
+        });
+      }
 
       const data = await response.json();
 
@@ -913,8 +934,12 @@ const MeetingAgent = () => {
         setCurrentReviewId(data.reviewId);
         localStorage.setItem('iml-current-review-id', data.reviewId);
         setShowShareModal(true);
+
+        if (isUpdate) {
+          alert('Review updated! Directors will see the latest changes at their existing link.');
+        }
       } else {
-        alert('Failed to create review');
+        alert(`Failed to ${isUpdate ? 'update' : 'create'} review`);
       }
     } catch (error) {
       console.error('Error sharing for review:', error);

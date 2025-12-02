@@ -45,6 +45,37 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Update existing review
+router.put('/:id', async (req, res) => {
+  try {
+    const { id: reviewId } = req.params;
+    const { meetings } = req.body;
+
+    console.log(`[UPDATE REVIEW] Received update request for review ${reviewId}`);
+    console.log('[UPDATE REVIEW] Meetings count:', meetings?.length);
+
+    if (!meetings || meetings.length === 0) {
+      return res.status(400).json({ error: 'No meetings provided' });
+    }
+
+    // Update review with new meetings (this will delete old meetings and approvals)
+    await dbHelpers.updateReview(reviewId, meetings);
+
+    console.log(`[UPDATE REVIEW] Review ${reviewId} updated successfully`);
+
+    res.json({
+      success: true,
+      reviewId,
+      reviewUrl: `/review/${reviewId}`,
+      message: `Review updated with ${meetings.length} meetings`
+    });
+  } catch (error) {
+    console.error('[UPDATE REVIEW] Error:', error);
+    console.error('[UPDATE REVIEW] Error stack:', error.stack);
+    res.status(500).json({ error: 'Failed to update review', details: error.message });
+  }
+});
+
 // Get review by ID
 router.get('/:id', async (req, res) => {
   try {
