@@ -542,7 +542,7 @@ const DirectorReviewView = ({ reviewId }) => {
                           className="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition flex items-center gap-2"
                         >
                           <XCircle className="w-4 h-4" />
-                          Cannot attend
+                          I will not attend
                         </button>
                         <button
                           onClick={() => {
