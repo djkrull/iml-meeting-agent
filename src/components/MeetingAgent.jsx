@@ -231,10 +231,11 @@ const MeetingAgent = () => {
       },
       {
         name: 'Evaluation meeting/lunch',
-        leadTime: 'end', // Special: April 20+ for Spring, week before end for Fall
+        leadTime: 'end', // Special: Last Friday before program end
         weekday: 5, // Friday
+        time: '12:00', // Lunch time
         participants: ['Program Organizers', 'Directors'],
-        duration: 30,
+        duration: 90, // Longer for lunch meeting
         description: 'Program evaluation and feedback'
       }
     ];
@@ -677,17 +678,28 @@ const MeetingAgent = () => {
     if (!startDate) return null;
 
     if (leadTime === 'end') {
-      // Special handling for evaluation meetings
+      // Special handling for evaluation meetings - last Friday before program end
       if (programType === 'Spring Program' || programType === 'Fall Program') {
-        const month = startDate.getMonth();
-        if (month >= 0 && month <= 5) {
-          // Spring program: April 20 or later
-          const evalDate = new Date(startDate.getFullYear(), 3, 20); // April 20
-          return evalDate > startDate ? evalDate : new Date(startDate.getTime() + (90 * 24 * 60 * 60 * 1000));
+        if (!endDate) return null;
+
+        // Start from program end date and go backwards to find last Friday
+        let evalDate = new Date(endDate);
+        const endDay = evalDate.getDay();
+
+        // Friday is day 5
+        if (endDay === 5) {
+          // End date is already Friday - use it
+          return evalDate;
+        } else if (endDay === 6) {
+          // Saturday - go back 1 day to Friday
+          evalDate.setDate(evalDate.getDate() - 1);
         } else {
-          // Fall program: week before end
-          return endDate ? new Date(endDate.getTime() - (7 * 24 * 60 * 60 * 1000)) : null;
+          // Sunday (0) through Thursday (4) - go back to previous Friday
+          const daysToSubtract = endDay === 0 ? 2 : (endDay + 2);
+          evalDate.setDate(evalDate.getDate() - daysToSubtract);
         }
+
+        return evalDate;
       }
     }
 
