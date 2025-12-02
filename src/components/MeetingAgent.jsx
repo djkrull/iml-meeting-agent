@@ -1208,6 +1208,52 @@ const MeetingAgent = () => {
     }
   };
 
+  // Force reload from database
+  const reloadFromDatabase = async () => {
+    if (!window.confirm('This will reload all programs and meetings from the database. Any unsaved changes will be lost. Continue?')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log('Force reloading from backend database...');
+      const response = await fetch(`${API_URL}/api/programs`);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Reloaded from backend:', data);
+
+        if (data.programs && data.programs.length > 0) {
+          // Parse dates back to Date objects
+          const programsWithDates = data.programs.map(p => ({
+            ...p,
+            startDate: new Date(p.startDate),
+            endDate: p.endDate ? new Date(p.endDate) : null
+          }));
+
+          const meetingsWithDates = data.meetings.map(m => ({
+            ...m,
+            date: new Date(m.date)
+          }));
+
+          setPrograms(programsWithDates);
+          setMeetings(meetingsWithDates);
+          alert(`✅ Successfully reloaded ${programsWithDates.length} programs and ${meetingsWithDates.length} meetings from database!`);
+          console.log(`Reloaded ${programsWithDates.length} programs and ${meetingsWithDates.length} meetings`);
+        } else {
+          alert('No programs found in database');
+        }
+      } else {
+        alert('Failed to reload from database. Status: ' + response.status);
+      }
+    } catch (error) {
+      console.error('Error reloading from database:', error);
+      alert('Failed to reload from database. Make sure the server is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Export to ICS (iCalendar) format for Outlook
   const exportToICS = () => {
     const approvedMeetings = meetings.filter(m => m.approved || m.status === 'scheduled');
@@ -1575,6 +1621,14 @@ const MeetingAgent = () => {
 
             {/* Action Buttons */}
             <div className="mb-8 flex justify-end gap-4 flex-wrap">
+              <button
+                onClick={reloadFromDatabase}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                title="Reload all meetings from the database"
+              >
+                <RefreshCw className="w-5 h-5" />
+                Reload from Database
+              </button>
               <button
                 onClick={removeMyDuplicates}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
