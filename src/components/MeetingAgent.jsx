@@ -999,6 +999,54 @@ const MeetingAgent = () => {
     }
   };
 
+  // Remove duplicates from local admin view
+  const removeMyDuplicates = () => {
+    const seen = new Map();
+    const unique = [];
+
+    meetings.forEach(meeting => {
+      const key = `${meeting.programName}|||${meeting.type}`;
+      if (!seen.has(key)) {
+        seen.set(key, true);
+        unique.push(meeting);
+      }
+    });
+
+    const removed = meetings.length - unique.length;
+    setMeetings(unique);
+    alert(`Removed ${removed} duplicate meetings from your admin view.\n${unique.length} unique meetings remain.`);
+  };
+
+  // Remove duplicate meetings from director review
+  const removeDuplicatesFromDirectorView = async () => {
+    if (!currentReviewId) {
+      alert('No active review.');
+      return;
+    }
+
+    if (!window.confirm('This will remove duplicate meetings from the director view. Continue?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}/deduplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(`Removed ${result.removed} duplicate meetings from director view.\n${result.remaining} unique meetings remain.\n\nDirectors need to refresh their browser.`);
+      } else {
+        alert('Failed to remove duplicates: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error removing duplicates:', error);
+      alert('Failed to remove duplicates. Make sure the server is running.');
+    }
+  };
+
   // Sync all meetings to director review
   const syncAllMeetingsToReview = async () => {
     if (!currentReviewId) {
@@ -1330,6 +1378,14 @@ const MeetingAgent = () => {
             {/* Action Buttons */}
             <div className="mb-8 flex justify-end gap-4 flex-wrap">
               <button
+                onClick={removeMyDuplicates}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                title="Remove duplicate meetings from your admin view"
+              >
+                <Trash2 className="w-5 h-5" />
+                Remove My Duplicates
+              </button>
+              <button
                 onClick={shareForReview}
                 className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
@@ -1353,6 +1409,14 @@ const MeetingAgent = () => {
                   >
                     <RefreshCw className="w-5 h-5" />
                     Refresh Director Attendance
+                  </button>
+                  <button
+                    onClick={removeDuplicatesFromDirectorView}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    title="Remove duplicate meetings from director view"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                    Remove Director Duplicates
                   </button>
                   <button
                     onClick={openClearModal}

@@ -258,4 +258,27 @@ router.post('/:id/clear-director', async (req, res) => {
   }
 });
 
+// Remove duplicate meetings from review
+router.post('/:id/deduplicate', async (req, res) => {
+  try {
+    const { id: reviewId } = req.params;
+
+    console.log(`[DEDUPE] Deduplicating meetings for review ${reviewId}`);
+
+    const result = await dbHelpers.deduplicateMeetings(reviewId);
+
+    console.log(`[DEDUPE] Removed ${result.removed} duplicates, ${result.remaining} meetings remain`);
+
+    res.json({
+      success: true,
+      message: 'Duplicates removed',
+      removed: result.removed,
+      remaining: result.remaining
+    });
+  } catch (error) {
+    console.error('[DEDUPE] Error deduplicating meetings:', error);
+    res.status(500).json({ error: 'Failed to deduplicate meetings', details: error.message });
+  }
+});
+
 module.exports = router;

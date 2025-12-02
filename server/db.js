@@ -635,6 +635,91 @@ const dbHelpers = {
     });
   },
 
+  // Remove duplicate meetings from a review (keeps oldest, removes newer duplicates)
+  deduplicateMeetings: (reviewId) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (USE_POSTGRES) {
+          // Get all meetings for this review
+          const result = await pool.query(
+            'SELECT id, program_name, type, date, time FROM meetings WHERE review_id = $1 ORDER BY id',
+            [reviewId]
+          );
+
+          const meetings = result.rows;
+          const seen = new Map();
+          const toDelete = [];
+
+          // Track which meetings are duplicates
+          meetings.forEach(meeting => {
+            const key = `${meeting.program_name}|||${meeting.type}`;
+            if (seen.has(key)) {
+              // This is a duplicate - mark for deletion
+              toDelete.push(meeting.id);
+            } else {
+              // First occurrence - keep it
+              seen.set(key, meeting.id);
+            }
+          });
+
+          // Delete duplicates
+          if (toDelete.length > 0) {
+            // First delete approvals for duplicate meetings
+            await pool.query('DELETE FROM approvals WHERE meeting_id = ANY($1)', [toDelete]);
+            // Then delete the duplicate meetings
+            await pool.query('DELETE FROM meetings WHERE id = ANY($1)', [toDelete]);
+          }
+
+          resolve({
+            removed: toDelete.length,
+            remaining: meetings.length - toDelete.length
+          });
+        } else {
+          // SQLite
+          db.all('SELECT id, program_name, type, date, time FROM meetings WHERE review_id = ? ORDER BY id', [reviewId], (err, meetings) => {
+            if (err) return reject(err);
+
+            const seen = new Map();
+            const toDelete = [];
+
+            // Track which meetings are duplicates
+            meetings.forEach(meeting => {
+              const key = `${meeting.program_name}|||${meeting.type}`;
+              if (seen.has(key)) {
+                // This is a duplicate - mark for deletion
+                toDelete.push(meeting.id);
+              } else {
+                // First occurrence - keep it
+                seen.set(key, meeting.id);
+              }
+            });
+
+            if (toDelete.length === 0) {
+              return resolve({ removed: 0, remaining: meetings.length });
+            }
+
+            // Delete approvals first
+            const placeholders = toDelete.map(() => '?').join(',');
+            db.run(`DELETE FROM approvals WHERE meeting_id IN (${placeholders})`, toDelete, (err) => {
+              if (err) return reject(err);
+
+              // Then delete duplicate meetings
+              db.run(`DELETE FROM meetings WHERE id IN (${placeholders})`, toDelete, function(err) {
+                if (err) return reject(err);
+                resolve({
+                  removed: toDelete.length,
+                  remaining: meetings.length - toDelete.length
+                });
+              });
+            });
+          });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
   // Clear all approvals from a specific director for a review
   clearDirectorApprovals: (reviewId, directorName) => {
     return new Promise(async (resolve, reject) => {
