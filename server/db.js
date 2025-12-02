@@ -592,12 +592,23 @@ const dbHelpers = {
     return new Promise(async (resolve, reject) => {
       try {
         if (USE_POSTGRES) {
-          const meetingResult = await pool.query(
+          // Try exact match first
+          let meetingResult = await pool.query(
             'SELECT * FROM meetings WHERE review_id = $1 AND program_name = $2 AND type = $3',
             [reviewId, programName, meetingType]
           );
 
+          // If no exact match, try case-insensitive and trimmed match
           if (meetingResult.rows.length === 0) {
+            console.log('[DB] Exact match failed, trying case-insensitive match...');
+            meetingResult = await pool.query(
+              'SELECT * FROM meetings WHERE review_id = $1 AND LOWER(TRIM(program_name)) = LOWER(TRIM($2)) AND LOWER(TRIM(type)) = LOWER(TRIM($3))',
+              [reviewId, programName, meetingType]
+            );
+          }
+
+          if (meetingResult.rows.length === 0) {
+            console.log(`[DB] No meeting found for program="${programName}" type="${meetingType}"`);
             return resolve(null);
           }
 
@@ -609,20 +620,43 @@ const dbHelpers = {
             approvals: approvalsResult.rows
           });
         } else {
+          // SQLite - try exact match first
           db.get(
             'SELECT * FROM meetings WHERE review_id = ? AND program_name = ? AND type = ?',
             [reviewId, programName, meetingType],
             (err, meeting) => {
               if (err) return reject(err);
-              if (!meeting) return resolve(null);
 
-              db.all('SELECT * FROM approvals WHERE meeting_id = ?', [meeting.id], (err, approvals) => {
-                if (err) return reject(err);
-                resolve({
-                  ...meeting,
-                  approvals: approvals || []
+              if (!meeting) {
+                // Try case-insensitive match
+                db.get(
+                  'SELECT * FROM meetings WHERE review_id = ? AND LOWER(TRIM(program_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(type)) = LOWER(TRIM(?))',
+                  [reviewId, programName, meetingType],
+                  (err2, meeting2) => {
+                    if (err2) return reject(err2);
+                    if (!meeting2) {
+                      console.log(`[DB] No meeting found for program="${programName}" type="${meetingType}"`);
+                      return resolve(null);
+                    }
+
+                    db.all('SELECT * FROM approvals WHERE meeting_id = ?', [meeting2.id], (err3, approvals) => {
+                      if (err3) return reject(err3);
+                      resolve({
+                        ...meeting2,
+                        approvals: approvals || []
+                      });
+                    });
+                  }
+                );
+              } else {
+                db.all('SELECT * FROM approvals WHERE meeting_id = ?', [meeting.id], (err, approvals) => {
+                  if (err) return reject(err);
+                  resolve({
+                    ...meeting,
+                    approvals: approvals || []
+                  });
                 });
-              });
+              }
             }
           );
         }
@@ -666,15 +700,38 @@ const dbHelpers = {
 
       if (USE_POSTGRES) {
         try {
-          const result = await pool.query(query, values);
+          // Try exact match first
+          let result = await pool.query(query, values);
+
+          // If no rows updated, try case-insensitive match
+          if (result.rowCount === 0) {
+            console.log('[DB UPDATE] Exact match updated 0 rows, trying case-insensitive match...');
+            const caseInsensitiveQuery = `UPDATE meetings SET ${fields.join(', ')} WHERE review_id = $${paramIndex} AND LOWER(TRIM(program_name)) = LOWER(TRIM($${paramIndex + 1})) AND LOWER(TRIM(type)) = LOWER(TRIM($${paramIndex + 2}))`;
+            result = await pool.query(caseInsensitiveQuery, values);
+          }
+
+          console.log(`[DB UPDATE] Updated ${result.rowCount} row(s) for program="${programName}" type="${meetingType}"`);
           resolve({ changes: result.rowCount, matched: programName, type: meetingType });
         } catch (err) {
           reject(err);
         }
       } else {
         db.run(query, values, function(err) {
-          if (err) reject(err);
-          else resolve({ changes: this.changes, matched: programName, type: meetingType });
+          if (err) return reject(err);
+
+          const changes = this.changes;
+          if (changes === 0) {
+            // Try case-insensitive match
+            const caseInsensitiveQuery = `UPDATE meetings SET ${fields.join(', ')} WHERE review_id = ? AND LOWER(TRIM(program_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(type)) = LOWER(TRIM(?))`;
+            db.run(caseInsensitiveQuery, values, function(err2) {
+              if (err2) return reject(err2);
+              console.log(`[DB UPDATE] Updated ${this.changes} row(s) for program="${programName}" type="${meetingType}"`);
+              resolve({ changes: this.changes, matched: programName, type: meetingType });
+            });
+          } else {
+            console.log(`[DB UPDATE] Updated ${changes} row(s) for program="${programName}" type="${meetingType}"`);
+            resolve({ changes: changes, matched: programName, type: meetingType });
+          }
         });
       }
     });

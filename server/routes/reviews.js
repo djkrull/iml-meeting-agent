@@ -132,8 +132,13 @@ router.post('/:id/sync-meeting', async (req, res) => {
     // If checkOnly, just check for approvals without updating
     if (checkOnly) {
       const meetingInfo = await dbHelpers.getMeetingByCharacteristics(reviewId, programName, meetingType);
+      console.log(`[SYNC CHECK] Meeting found:`, meetingInfo ? 'YES' : 'NO');
+      if (meetingInfo) {
+        console.log(`[SYNC CHECK] Approvals count: ${meetingInfo.approvals?.length || 0}`);
+      }
       return res.json({
         success: true,
+        found: meetingInfo !== null,
         hasApprovals: meetingInfo && meetingInfo.approvals && meetingInfo.approvals.length > 0,
         approvalCount: meetingInfo?.approvals?.length || 0
       });

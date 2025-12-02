@@ -1086,6 +1086,7 @@ const MeetingAgent = () => {
       // Step 1: Check which meetings have existing approvals
       console.log('Checking for existing approvals...');
       const meetingsWithApprovals = [];
+      const meetingsNotFound = [];
 
       for (const meeting of meetings) {
         try {
@@ -1103,7 +1104,14 @@ const MeetingAgent = () => {
           });
 
           const result = await response.json();
-          if (result.hasApprovals) {
+
+          // Check if meeting was found in director review
+          if (result.found === false) {
+            meetingsNotFound.push({
+              name: meeting.type,
+              program: meeting.programName
+            });
+          } else if (result.hasApprovals) {
             meetingsWithApprovals.push({
               name: meeting.type,
               program: meeting.programName,
@@ -1113,6 +1121,16 @@ const MeetingAgent = () => {
         } catch (err) {
           console.error(`Failed to check meeting: ${meeting.type}`, err);
         }
+      }
+
+      // Warn about meetings not found in director review
+      if (meetingsNotFound.length > 0) {
+        const notFoundList = meetingsNotFound
+          .map(m => `  • ${m.name} (${m.program})`)
+          .join('\n');
+
+        alert(`⚠️ WARNING: ${meetingsNotFound.length} meeting(s) not found in director review:\n\n${notFoundList}\n\nThese meetings may have been added after sharing with directors.\n\nTo sync these meetings, you need to use "Share for Director Review" again.`);
+        return;
       }
 
       // Step 2: If meetings have approvals, show warning
@@ -1137,6 +1155,7 @@ const MeetingAgent = () => {
       let successCount = 0;
       let errorCount = 0;
       let updatedCount = 0;
+      let notUpdatedMeetings = [];
 
       for (const meeting of meetings) {
         try {
@@ -1158,6 +1177,11 @@ const MeetingAgent = () => {
 
           if (result.changes > 0) {
             updatedCount++;
+          } else {
+            notUpdatedMeetings.push({
+              name: meeting.type,
+              program: meeting.programName
+            });
           }
           successCount++;
         } catch (err) {
@@ -1166,8 +1190,15 @@ const MeetingAgent = () => {
         }
       }
 
-      if (errorCount === 0) {
-        alert(`Successfully synced all ${successCount} meetings!\n\n${updatedCount} meetings were updated in the director view.\n\nDirectors will see the new times when they refresh.`);
+      // Show appropriate message based on results
+      if (notUpdatedMeetings.length > 0) {
+        const notUpdatedList = notUpdatedMeetings
+          .map(m => `  • ${m.name} (${m.program})`)
+          .join('\n');
+
+        alert(`⚠️ SYNC INCOMPLETE\n\n${updatedCount} meetings were successfully updated.\n\nHowever, ${notUpdatedMeetings.length} meeting(s) were NOT found in director review:\n\n${notUpdatedList}\n\nThese meetings may have been added after sharing with directors, or the program/meeting names don't match exactly.\n\nTo fix: Use "Share for Director Review" again to create a fresh director review.`);
+      } else if (errorCount === 0) {
+        alert(`✅ Successfully synced all ${successCount} meetings!\n\n${updatedCount} meetings were updated in the director view.\n\nDirectors will see the new times when they refresh.`);
       } else {
         alert(`Synced ${successCount} meetings (${updatedCount} updated). ${errorCount} failed.\n\nCheck console for details.`);
       }
