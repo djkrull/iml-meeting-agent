@@ -1005,10 +1005,12 @@ const MeetingAgent = () => {
     try {
       let successCount = 0;
       let errorCount = 0;
+      let updatedCount = 0;
 
       for (const meeting of meetings) {
         try {
-          await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
+          console.log(`Syncing meeting ${meeting.id}: ${meeting.type} - ${meeting.programName}`);
+          const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1018,6 +1020,13 @@ const MeetingAgent = () => {
               description: meeting.description
             })
           });
+
+          const result = await response.json();
+          console.log(`Sync result for meeting ${meeting.id}:`, result);
+
+          if (result.changes > 0) {
+            updatedCount++;
+          }
           successCount++;
         } catch (err) {
           console.error(`Failed to sync meeting ${meeting.id}:`, err);
@@ -1026,7 +1035,7 @@ const MeetingAgent = () => {
       }
 
       if (errorCount === 0) {
-        alert(`Successfully synced all ${successCount} meetings to director view!`);
+        alert(`Successfully synced ${successCount} meetings (${updatedCount} updated in database).\n\nIf count is 0, meeting IDs may have changed. Try "Share for Director Review" again.`);
       } else {
         alert(`Synced ${successCount} meetings. ${errorCount} failed. Check console for details.`);
       }

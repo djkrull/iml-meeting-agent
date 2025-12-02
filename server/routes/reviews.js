@@ -116,6 +116,9 @@ router.post('/:id/sync-meeting', async (req, res) => {
     const { id: reviewId } = req.params;
     const { meetingId, time, date, description } = req.body;
 
+    console.log(`[SYNC] Syncing meeting ${meetingId} in review ${reviewId}`);
+    console.log(`[SYNC] Updates:`, { time, date: date?.substring(0, 10), description: description?.substring(0, 50) });
+
     if (!meetingId) {
       return res.status(400).json({ error: 'Meeting ID is required' });
     }
@@ -131,14 +134,16 @@ router.post('/:id/sync-meeting', async (req, res) => {
 
     const result = await dbHelpers.updateMeetingByMeetingId(reviewId, meetingId, updates);
 
+    console.log(`[SYNC] Result: ${result.changes} rows updated`);
+
     res.json({
       success: true,
       message: 'Meeting synced to review',
       changes: result.changes
     });
   } catch (error) {
-    console.error('Error syncing meeting:', error);
-    res.status(500).json({ error: 'Failed to sync meeting' });
+    console.error('[SYNC] Error syncing meeting:', error);
+    res.status(500).json({ error: 'Failed to sync meeting', details: error.message });
   }
 });
 
