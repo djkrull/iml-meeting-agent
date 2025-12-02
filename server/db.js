@@ -491,6 +491,102 @@ const dbHelpers = {
     });
   },
 
+  // Update meeting details (time, date, description)
+  updateMeetingDetails: (meetingId, updates) => {
+    return new Promise(async (resolve, reject) => {
+      const fields = [];
+      const values = [];
+      let paramIndex = 1;
+
+      // Build dynamic UPDATE query based on provided fields
+      if (updates.description !== undefined) {
+        fields.push(USE_POSTGRES ? `description = $${paramIndex}` : 'description = ?');
+        values.push(updates.description);
+        paramIndex++;
+      }
+      if (updates.time !== undefined) {
+        fields.push(USE_POSTGRES ? `time = $${paramIndex}` : 'time = ?');
+        values.push(updates.time);
+        paramIndex++;
+      }
+      if (updates.date !== undefined) {
+        const dateStr = typeof updates.date === 'string' ? updates.date : updates.date.toISOString();
+        fields.push(USE_POSTGRES ? `date = $${paramIndex}` : 'date = ?');
+        values.push(dateStr);
+        paramIndex++;
+      }
+
+      if (fields.length === 0) {
+        return reject(new Error('No fields to update'));
+      }
+
+      values.push(meetingId);
+      const query = `UPDATE meetings SET ${fields.join(', ')} WHERE id = ${USE_POSTGRES ? `$${paramIndex}` : '?'}`;
+
+      if (USE_POSTGRES) {
+        try {
+          const result = await pool.query(query, values);
+          resolve({ id: meetingId, changes: result.rowCount });
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        db.run(query, values, function(err) {
+          if (err) reject(err);
+          else resolve({ id: meetingId, changes: this.changes });
+        });
+      }
+    });
+  },
+
+  // Update meeting in review by meeting_id (the original meeting ID from MeetingAgent)
+  updateMeetingByMeetingId: (reviewId, meetingId, updates) => {
+    return new Promise(async (resolve, reject) => {
+      const fields = [];
+      const values = [];
+      let paramIndex = 1;
+
+      // Build dynamic UPDATE query based on provided fields
+      if (updates.description !== undefined) {
+        fields.push(USE_POSTGRES ? `description = $${paramIndex}` : 'description = ?');
+        values.push(updates.description);
+        paramIndex++;
+      }
+      if (updates.time !== undefined) {
+        fields.push(USE_POSTGRES ? `time = $${paramIndex}` : 'time = ?');
+        values.push(updates.time);
+        paramIndex++;
+      }
+      if (updates.date !== undefined) {
+        const dateStr = typeof updates.date === 'string' ? updates.date : updates.date.toISOString();
+        fields.push(USE_POSTGRES ? `date = $${paramIndex}` : 'date = ?');
+        values.push(dateStr);
+        paramIndex++;
+      }
+
+      if (fields.length === 0) {
+        return reject(new Error('No fields to update'));
+      }
+
+      values.push(reviewId, meetingId);
+      const query = `UPDATE meetings SET ${fields.join(', ')} WHERE review_id = ${USE_POSTGRES ? `$${paramIndex}` : '?'} AND meeting_id = ${USE_POSTGRES ? `$${paramIndex + 1}` : '?'}`;
+
+      if (USE_POSTGRES) {
+        try {
+          const result = await pool.query(query, values);
+          resolve({ changes: result.rowCount });
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        db.run(query, values, function(err) {
+          if (err) reject(err);
+          else resolve({ changes: this.changes });
+        });
+      }
+    });
+  },
+
   // Clear all approvals from a specific director for a review
   clearDirectorApprovals: (reviewId, directorName) => {
     return new Promise(async (resolve, reject) => {

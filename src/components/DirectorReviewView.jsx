@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X, Download, Info } from 'lucide-react';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const DirectorReviewView = ({ reviewId }) => {
   const [review, setReview] = useState(null);

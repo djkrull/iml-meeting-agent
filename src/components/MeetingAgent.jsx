@@ -717,22 +717,49 @@ const MeetingAgent = () => {
     ));
   };
 
+  // Sync meeting to review if active review exists
+  const syncMeetingToReview = async (meetingId, updates) => {
+    if (!currentReviewId) return;
+
+    try {
+      await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meetingId,
+          ...updates
+        })
+      });
+      console.log(`Synced meeting ${meetingId} to review`);
+    } catch (error) {
+      console.error('Error syncing meeting to review:', error);
+      // Don't block the UI update if sync fails
+    }
+  };
+
   // Update meeting date
-  const updateMeetingDate = (meetingId, newDate) => {
+  const updateMeetingDate = async (meetingId, newDate) => {
+    const dateObj = new Date(newDate);
     setMeetings(meetings.map(m =>
       m.id === meetingId
-        ? { ...m, date: new Date(newDate) }
+        ? { ...m, date: dateObj }
         : m
     ));
+
+    // Sync to review if exists
+    await syncMeetingToReview(meetingId, { date: dateObj.toISOString() });
   };
 
   // Update meeting time
-  const updateMeetingTime = (meetingId, newTime) => {
+  const updateMeetingTime = async (meetingId, newTime) => {
     setMeetings(meetings.map(m =>
       m.id === meetingId
         ? { ...m, time: newTime }
         : m
     ));
+
+    // Sync to review if exists
+    await syncMeetingToReview(meetingId, { time: newTime });
   };
 
   // Format date for input field (YYYY-MM-DD)

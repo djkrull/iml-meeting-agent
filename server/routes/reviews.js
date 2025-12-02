@@ -110,6 +110,38 @@ router.patch('/:id/meetings/:meetingId', async (req, res) => {
   }
 });
 
+// Sync meeting updates from admin to review (by meeting_id)
+router.post('/:id/sync-meeting', async (req, res) => {
+  try {
+    const { id: reviewId } = req.params;
+    const { meetingId, time, date, description } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({ error: 'Meeting ID is required' });
+    }
+
+    const updates = {};
+    if (time !== undefined) updates.time = time;
+    if (date !== undefined) updates.date = date;
+    if (description !== undefined) updates.description = description;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    const result = await dbHelpers.updateMeetingByMeetingId(reviewId, meetingId, updates);
+
+    res.json({
+      success: true,
+      message: 'Meeting synced to review',
+      changes: result.changes
+    });
+  } catch (error) {
+    console.error('Error syncing meeting:', error);
+    res.status(500).json({ error: 'Failed to sync meeting' });
+  }
+});
+
 // Submit approval for a meeting
 router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
   try {
