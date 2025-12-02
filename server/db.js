@@ -1064,18 +1064,20 @@ const dbHelpers = {
     });
   },
 
-  // Save programs and meetings
+  // Save programs and meetings (INSERT NEW ONLY - never delete, never update existing)
   savePrograms: (programs, meetings) => {
     return new Promise(async (resolve, reject) => {
       const now = new Date().toISOString();
 
       try {
         if (USE_POSTGRES) {
-          // Delete existing data first
-          await pool.query('DELETE FROM program_meetings');
-          await pool.query('DELETE FROM programs');
+          console.log('[SAVE] Starting INSERT operation (adding new items only, preserving existing)...');
+          let programsInserted = 0;
+          let programsSkipped = 0;
+          let meetingsInserted = 0;
+          let meetingsSkipped = 0;
 
-          // Insert programs
+          // Insert new programs only (skip existing)
           for (const program of programs) {
             const startDate = typeof program.startDate === 'string'
               ? program.startDate
@@ -1084,31 +1086,63 @@ const dbHelpers = {
               ? (typeof program.endDate === 'string' ? program.endDate : program.endDate.toISOString())
               : null;
 
-            await pool.query(
-              `INSERT INTO programs (program_id, name, type, start_date, end_date, organizer, status, year, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-              [program.id, program.name, program.type, startDate, endDate,
-               program.organizer, program.status, program.year, now, now]
-            );
+            try {
+              await pool.query(
+                `INSERT INTO programs (program_id, name, type, start_date, end_date, organizer, status, year, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT ON CONSTRAINT programs_unique_idx
+                 DO NOTHING`,
+                [program.id, program.name, program.type, startDate, endDate,
+                 program.organizer, program.status, program.year, now, now]
+              );
+              programsInserted++;
+            } catch (err) {
+              if (err.code === '23505') { // Unique violation - already exists
+                programsSkipped++;
+              } else {
+                throw err;
+              }
+            }
           }
 
-          // Insert meetings
+          // Insert new meetings only (skip existing)
           for (const meeting of meetings) {
             const meetingDate = typeof meeting.date === 'string'
               ? meeting.date
               : meeting.date.toISOString();
 
-            await pool.query(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-              [meeting.id, meeting.programId, meeting.programName, meeting.programType,
-               meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
-               meeting.time, meeting.duration, JSON.stringify(meeting.participants),
-               meeting.description, meeting.status, meeting.approved || false, now, now]
-            );
+            try {
+              await pool.query(
+                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                 ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
+                 DO NOTHING`,
+                [meeting.id, meeting.programId, meeting.programName, meeting.programType,
+                 meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
+                 meeting.time, meeting.duration, JSON.stringify(meeting.participants),
+                 meeting.description, meeting.status, meeting.approved || false, now, now]
+              );
+              meetingsInserted++;
+            } catch (err) {
+              if (err.code === '23505') { // Unique violation - already exists
+                meetingsSkipped++;
+              } else {
+                throw err;
+              }
+            }
           }
 
-          resolve({ programs: programs.length, meetings: meetings.length });
+          console.log(`[SAVE] Programs: ${programsInserted} inserted, ${programsSkipped} skipped (already exist)`);
+          console.log(`[SAVE] Meetings: ${meetingsInserted} inserted, ${meetingsSkipped} skipped (already exist)`);
+
+          resolve({
+            programs: programs.length,
+            meetings: meetings.length,
+            programsInserted,
+            programsSkipped,
+            meetingsInserted,
+            meetingsSkipped
+          });
         } else {
           // SQLite
           db.serialize(() => {
