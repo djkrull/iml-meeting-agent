@@ -1447,6 +1447,87 @@ const MeetingAgent = () => {
     );
   };
 
+  // Auto-resolve conflicts by moving meetings to next available time
+  const autoResolveConflicts = () => {
+    if (conflicts.length === 0) {
+      alert('No conflicts to resolve!');
+      return;
+    }
+
+    const conflictCount = conflicts.reduce((sum, c) => sum + c.meetings.length - 1, 0);
+
+    if (!window.confirm(`This will automatically move ${conflictCount} conflicting meetings to the next available time slots.\n\nConflicts found:\n${conflicts.map(c => `  • ${c.date} at ${c.time} (${c.meetings.length} meetings)`).join('\n')}\n\nContinue?`)) {
+      return;
+    }
+
+    const updatedMeetings = [...meetings];
+    let movedCount = 0;
+
+    // For each conflict, keep the first meeting and move others
+    conflicts.forEach(conflict => {
+      // Skip the first meeting (keep it in place)
+      const meetingsToMove = conflict.meetings.slice(1);
+
+      meetingsToMove.forEach(meetingToMove => {
+        // Find this meeting in the array
+        const index = updatedMeetings.findIndex(m => m.id === meetingToMove.id);
+        if (index === -1) return;
+
+        // Find next available 30-minute slot on the same day
+        const currentDate = new Date(meetingToMove.date);
+        const dateStr = currentDate.toISOString().split('T')[0];
+
+        // Parse current time
+        const [hours, minutes] = meetingToMove.time.split(':').map(Number);
+        let newHours = hours;
+        let newMinutes = minutes;
+
+        // Try times in 30-minute increments
+        let found = false;
+        for (let attempt = 0; attempt < 48; attempt++) { // Try up to 24 hours
+          newMinutes += 30;
+          if (newMinutes >= 60) {
+            newMinutes = 0;
+            newHours++;
+          }
+          if (newHours >= 24) {
+            newHours = 0;
+            currentDate.setDate(currentDate.getDate() + 1); // Move to next day
+          }
+
+          const testTime = `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
+          const testDateStr = currentDate.toISOString().split('T')[0];
+          const testKey = `${testDateStr}|${testTime}`;
+
+          // Check if this time is available
+          const isOccupied = updatedMeetings.some(m => {
+            const mDateStr = new Date(m.date).toISOString().split('T')[0];
+            return mDateStr === testDateStr && m.time === testTime && m.id !== meetingToMove.id;
+          });
+
+          if (!isOccupied) {
+            // Found available slot
+            updatedMeetings[index] = {
+              ...updatedMeetings[index],
+              date: new Date(currentDate),
+              time: testTime
+            };
+            movedCount++;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          console.error('Could not find available slot for meeting:', meetingToMove.type);
+        }
+      });
+    });
+
+    setMeetings(updatedMeetings);
+    alert(`✅ Resolved conflicts!\n\n${movedCount} meetings moved to available time slots.`);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
       <div className="max-w-7xl mx-auto">
@@ -1574,11 +1655,20 @@ const MeetingAgent = () => {
                 <div className="flex items-start">
                   <XCircle className="w-8 h-8 text-red-600 mr-4 flex-shrink-0 mt-1" />
                   <div className="flex-1">
-                    <h2 className="text-2xl font-bold text-red-800 mb-3">
-                      ⚠️ Meeting Conflicts Detected
-                    </h2>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold text-red-800">
+                        ⚠️ Meeting Conflicts Detected
+                      </h2>
+                      <button
+                        onClick={autoResolveConflicts}
+                        className="bg-red-700 hover:bg-red-800 text-white px-6 py-2 rounded-lg font-semibold flex items-center gap-2 transition"
+                      >
+                        <RefreshCw className="w-5 h-5" />
+                        Auto-Resolve All Conflicts
+                      </button>
+                    </div>
                     <p className="text-red-700 mb-4">
-                      The following time slots have multiple meetings scheduled. Please resolve these conflicts:
+                      The following time slots have multiple meetings scheduled. Click "Auto-Resolve" to automatically move conflicting meetings to available times:
                     </p>
                     <div className="space-y-4">
                       {conflicts.map((conflict, idx) => (
