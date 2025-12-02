@@ -967,11 +967,16 @@ const MeetingAgent = () => {
 
       const reviewData = await response.json();
 
+      console.log('[REFRESH] Review data:', reviewData);
+      console.log('[REFRESH] Meetings with approvals:', reviewData.meetings.filter(m => m.approvals?.length > 0).length);
+
       // Update meetings with approval counts from the database
       setMeetings(prevMeetings => {
         return prevMeetings.map(meeting => {
-          // Find matching meeting in review data by meeting_id
-          const dbMeeting = reviewData.meetings.find(m => m.meeting_id === meeting.id);
+          // Match by characteristics (program_name + type) instead of meeting_id
+          const dbMeeting = reviewData.meetings.find(m =>
+            m.program_name === meeting.programName && m.type === meeting.type
+          );
 
           if (dbMeeting) {
             const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -980,6 +985,8 @@ const MeetingAgent = () => {
             const rejectedCount = dbMeeting.approvals?.filter(a =>
               a.status === 'rejected' || a.status === 'declined'
             ).length || 0;
+
+            console.log(`[REFRESH] Matched "${meeting.type}" - ${approvedCount} approved, ${rejectedCount} rejected`);
 
             // Update meeting with approval info
             return {
