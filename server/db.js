@@ -142,6 +142,17 @@ async function initializePostgresDatabase() {
       console.log('Migration note (program_id):', migrationError.message);
     }
 
+    // Migration: Add unique constraint to prevent duplicates
+    try {
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS program_meetings_unique_idx
+        ON program_meetings (program_name, type, date, time)
+      `);
+      console.log('Added unique constraint to prevent duplicates');
+    } catch (migrationError) {
+      console.log('Migration note (unique constraint):', migrationError.message);
+    }
+
     console.log('PostgreSQL tables initialized');
   } catch (error) {
     console.error('Error initializing PostgreSQL:', error);
