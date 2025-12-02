@@ -729,15 +729,23 @@ const MeetingAgent = () => {
     if (!currentReviewId) return;
 
     try {
+      // Find the meeting to get its programName and type
+      const meeting = meetings.find(m => m.id === meetingId);
+      if (!meeting) {
+        console.warn(`Meeting ${meetingId} not found for sync`);
+        return;
+      }
+
       await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          meetingId,
+          programName: meeting.programName,
+          meetingType: meeting.type,
           ...updates
         })
       });
-      console.log(`Synced meeting ${meetingId} to review`);
+      console.log(`Synced meeting: ${meeting.type} - ${meeting.programName}`);
     } catch (error) {
       console.error('Error syncing meeting to review:', error);
       // Don't block the UI update if sync fails
@@ -1009,12 +1017,13 @@ const MeetingAgent = () => {
 
       for (const meeting of meetings) {
         try {
-          console.log(`Syncing meeting ${meeting.id}: ${meeting.type} - ${meeting.programName}`);
+          console.log(`Syncing meeting: ${meeting.type} - ${meeting.programName}`);
           const response = await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              meetingId: meeting.id,
+              programName: meeting.programName,
+              meetingType: meeting.type,
               date: meeting.date.toISOString(),
               time: meeting.time,
               description: meeting.description
@@ -1022,22 +1031,22 @@ const MeetingAgent = () => {
           });
 
           const result = await response.json();
-          console.log(`Sync result for meeting ${meeting.id}:`, result);
+          console.log(`Sync result: ${meeting.type}`, result);
 
           if (result.changes > 0) {
             updatedCount++;
           }
           successCount++;
         } catch (err) {
-          console.error(`Failed to sync meeting ${meeting.id}:`, err);
+          console.error(`Failed to sync meeting: ${meeting.type} - ${meeting.programName}`, err);
           errorCount++;
         }
       }
 
       if (errorCount === 0) {
-        alert(`Successfully synced ${successCount} meetings (${updatedCount} updated in database).\n\nIf count is 0, meeting IDs may have changed. Try "Share for Director Review" again.`);
+        alert(`Successfully synced all ${successCount} meetings!\n\n${updatedCount} meetings were updated in the director view.\n\nDirectors will see the new times when they refresh.`);
       } else {
-        alert(`Synced ${successCount} meetings. ${errorCount} failed. Check console for details.`);
+        alert(`Synced ${successCount} meetings (${updatedCount} updated). ${errorCount} failed.\n\nCheck console for details.`);
       }
     } catch (error) {
       console.error('Error syncing meetings:', error);

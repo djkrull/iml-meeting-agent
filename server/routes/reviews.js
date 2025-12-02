@@ -114,14 +114,11 @@ router.patch('/:id/meetings/:meetingId', async (req, res) => {
 router.post('/:id/sync-meeting', async (req, res) => {
   try {
     const { id: reviewId } = req.params;
-    const { meetingId, time, date, description } = req.body;
+    const { meetingId, time, date, description, programName, meetingType } = req.body;
 
-    console.log(`[SYNC] Syncing meeting ${meetingId} in review ${reviewId}`);
+    console.log(`[SYNC] Syncing meeting in review ${reviewId}`);
+    console.log(`[SYNC] Program: ${programName}, Type: ${meetingType}`);
     console.log(`[SYNC] Updates:`, { time, date: date?.substring(0, 10), description: description?.substring(0, 50) });
-
-    if (!meetingId) {
-      return res.status(400).json({ error: 'Meeting ID is required' });
-    }
 
     const updates = {};
     if (time !== undefined) updates.time = time;
@@ -132,9 +129,21 @@ router.post('/:id/sync-meeting', async (req, res) => {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    const result = await dbHelpers.updateMeetingByMeetingId(reviewId, meetingId, updates);
+    let result;
 
-    console.log(`[SYNC] Result: ${result.changes} rows updated`);
+    // Try matching by program name and type (more robust)
+    if (programName && meetingType) {
+      result = await dbHelpers.updateMeetingByCharacteristics(reviewId, programName, meetingType, updates);
+      console.log(`[SYNC] Matched by characteristics: ${result.changes} rows updated`);
+    }
+    // Fallback to meeting ID if characteristics not provided
+    else if (meetingId) {
+      result = await dbHelpers.updateMeetingByMeetingId(reviewId, meetingId, updates);
+      console.log(`[SYNC] Matched by ID: ${result.changes} rows updated`);
+    }
+    else {
+      return res.status(400).json({ error: 'Either (programName + meetingType) or meetingId is required' });
+    }
 
     res.json({
       success: true,

@@ -587,6 +587,54 @@ const dbHelpers = {
     });
   },
 
+  // Update meeting in review by characteristics (program_name + type)
+  updateMeetingByCharacteristics: (reviewId, programName, meetingType, updates) => {
+    return new Promise(async (resolve, reject) => {
+      const fields = [];
+      const values = [];
+      let paramIndex = 1;
+
+      // Build dynamic UPDATE query based on provided fields
+      if (updates.description !== undefined) {
+        fields.push(USE_POSTGRES ? `description = $${paramIndex}` : 'description = ?');
+        values.push(updates.description);
+        paramIndex++;
+      }
+      if (updates.time !== undefined) {
+        fields.push(USE_POSTGRES ? `time = $${paramIndex}` : 'time = ?');
+        values.push(updates.time);
+        paramIndex++;
+      }
+      if (updates.date !== undefined) {
+        const dateStr = typeof updates.date === 'string' ? updates.date : updates.date.toISOString();
+        fields.push(USE_POSTGRES ? `date = $${paramIndex}` : 'date = ?');
+        values.push(dateStr);
+        paramIndex++;
+      }
+
+      if (fields.length === 0) {
+        return reject(new Error('No fields to update'));
+      }
+
+      values.push(reviewId, programName, meetingType);
+      const query = `UPDATE meetings SET ${fields.join(', ')} WHERE review_id = ${USE_POSTGRES ? `$${paramIndex}` : '?'} AND program_name = ${USE_POSTGRES ? `$${paramIndex + 1}` : '?'} AND type = ${USE_POSTGRES ? `$${paramIndex + 2}` : '?'}`;
+
+      if (USE_POSTGRES) {
+        try {
+          const result = await pool.query(query, values);
+          resolve({ changes: result.rowCount, matched: programName, type: meetingType });
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        db.run(query, values, function(err) {
+          if (err) reject(err);
+          else resolve({ changes: this.changes, matched: programName, type: meetingType });
+        });
+      }
+    });
+  },
+
   // Clear all approvals from a specific director for a review
   clearDirectorApprovals: (reviewId, directorName) => {
     return new Promise(async (resolve, reject) => {
