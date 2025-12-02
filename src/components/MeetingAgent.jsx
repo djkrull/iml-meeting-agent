@@ -1283,6 +1283,57 @@ const MeetingAgent = () => {
     alreadyScheduled: filteredMeetings.filter(m => m.status === 'already-scheduled').length
   };
 
+  // Detect meeting conflicts (same date and time)
+  const detectConflicts = () => {
+    const conflicts = [];
+    const timeSlots = new Map();
+
+    filteredMeetings.forEach(meeting => {
+      const dateStr = meeting.date.toISOString().split('T')[0];
+      const key = `${dateStr}|${meeting.time}`;
+
+      if (timeSlots.has(key)) {
+        const existing = timeSlots.get(key);
+        conflicts.push({
+          date: dateStr,
+          time: meeting.time,
+          meetings: [existing, meeting]
+        });
+      } else {
+        timeSlots.set(key, meeting);
+      }
+    });
+
+    // Group all meetings with same date/time together
+    const conflictMap = new Map();
+    conflicts.forEach(conflict => {
+      const key = `${conflict.date}|${conflict.time}`;
+      if (!conflictMap.has(key)) {
+        conflictMap.set(key, {
+          date: conflict.date,
+          time: conflict.time,
+          meetings: []
+        });
+      }
+      conflict.meetings.forEach(m => {
+        if (!conflictMap.get(key).meetings.find(existing => existing.id === m.id)) {
+          conflictMap.get(key).meetings.push(m);
+        }
+      });
+    });
+
+    return Array.from(conflictMap.values());
+  };
+
+  const conflicts = detectConflicts();
+
+  // Helper to check if a meeting is in conflict
+  const isConflictingMeeting = (meeting) => {
+    return conflicts.some(conflict =>
+      conflict.meetings.some(m => m.id === meeting.id)
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
       <div className="max-w-7xl mx-auto">
@@ -1403,6 +1454,47 @@ const MeetingAgent = () => {
                 </div>
               </div>
             </div>
+
+            {/* Meeting Conflicts Warning */}
+            {conflicts.length > 0 && (
+              <div className="bg-red-50 border-2 border-red-400 rounded-lg shadow-lg p-6 mb-8">
+                <div className="flex items-start">
+                  <XCircle className="w-8 h-8 text-red-600 mr-4 flex-shrink-0 mt-1" />
+                  <div className="flex-1">
+                    <h2 className="text-2xl font-bold text-red-800 mb-3">
+                      ⚠️ Meeting Conflicts Detected
+                    </h2>
+                    <p className="text-red-700 mb-4">
+                      The following time slots have multiple meetings scheduled. Please resolve these conflicts:
+                    </p>
+                    <div className="space-y-4">
+                      {conflicts.map((conflict, idx) => (
+                        <div key={idx} className="bg-white border border-red-300 rounded-lg p-4">
+                          <div className="flex items-center mb-3">
+                            <Clock className="w-5 h-5 text-red-600 mr-2" />
+                            <span className="font-bold text-red-800">
+                              {new Date(conflict.date).toLocaleDateString('sv-SE', {
+                                weekday: 'long',
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
+                              })} at {conflict.time}
+                            </span>
+                          </div>
+                          <div className="ml-7 space-y-2">
+                            {conflict.meetings.map((meeting, mIdx) => (
+                              <div key={mIdx} className="text-sm text-gray-700 bg-red-50 p-2 rounded">
+                                <span className="font-semibold">{meeting.type}</span> - {meeting.programName}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Programs Overview */}
             <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
@@ -1616,11 +1708,15 @@ const MeetingAgent = () => {
               )}
 
               <div className="space-y-4">
-                {filteredMeetings.map(meeting => (
+                {filteredMeetings.map(meeting => {
+                  const isConflict = isConflictingMeeting(meeting);
+                  return (
                   <div
                     key={meeting.id}
                     className={`border-l-4 p-4 rounded-r-lg transition ${
-                      meeting.status === 'already-scheduled'
+                      isConflict
+                        ? 'border-red-600 bg-red-100 shadow-lg'
+                        : meeting.status === 'already-scheduled'
                         ? 'border-gray-400 bg-gray-100 opacity-75'
                         : meeting.status === 'scheduled'
                         ? 'border-indigo-600 bg-indigo-50'
@@ -1641,6 +1737,11 @@ const MeetingAgent = () => {
                           <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getTypeBadgeColor(meeting.programType)}`}>
                             {meeting.programType} {meeting.programYear}
                           </span>
+                          {isConflict && (
+                            <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-600 text-white animate-pulse">
+                              ⚠️ TIME CONFLICT
+                            </span>
+                          )}
                           {meeting.approvals && meeting.approvals.length > 0 && (
                             <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                               meeting.approvedCount === 2 ? 'bg-green-100 text-green-800' :
@@ -1828,7 +1929,8 @@ const MeetingAgent = () => {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </>
