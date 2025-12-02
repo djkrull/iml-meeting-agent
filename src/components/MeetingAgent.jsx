@@ -991,6 +991,51 @@ const MeetingAgent = () => {
     }
   };
 
+  // Sync all meetings to director review
+  const syncAllMeetingsToReview = async () => {
+    if (!currentReviewId) {
+      alert('No active review. Please share for director review first.');
+      return;
+    }
+
+    if (!window.confirm('This will update all meeting times and dates in the director view to match your current admin view. Continue?')) {
+      return;
+    }
+
+    try {
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const meeting of meetings) {
+        try {
+          await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              meetingId: meeting.id,
+              date: meeting.date.toISOString(),
+              time: meeting.time,
+              description: meeting.description
+            })
+          });
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to sync meeting ${meeting.id}:`, err);
+          errorCount++;
+        }
+      }
+
+      if (errorCount === 0) {
+        alert(`Successfully synced all ${successCount} meetings to director view!`);
+      } else {
+        alert(`Synced ${successCount} meetings. ${errorCount} failed. Check console for details.`);
+      }
+    } catch (error) {
+      console.error('Error syncing meetings:', error);
+      alert('Failed to sync meetings. Make sure the server is running.');
+    }
+  };
+
   // Export to ICS (iCalendar) format for Outlook
   const exportToICS = () => {
     const approvedMeetings = meetings.filter(m => m.approved || m.status === 'scheduled');
@@ -1276,6 +1321,14 @@ const MeetingAgent = () => {
               {currentReviewId && (
                 <>
                   <button
+                    onClick={syncAllMeetingsToReview}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    title="Push all current meeting times/dates to director view"
+                  >
+                    <RefreshCw className="w-5 h-5" />
+                    Sync All to Directors
+                  </button>
+                  <button
                     onClick={refreshApprovals}
                     className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                     title="Check latest director availability responses"
@@ -1295,7 +1348,7 @@ const MeetingAgent = () => {
               )}
               <button
                 onClick={approveAll}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <CheckCircle className="w-5 h-5" />
                 Approve All
