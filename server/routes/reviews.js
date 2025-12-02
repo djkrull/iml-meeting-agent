@@ -209,6 +209,33 @@ router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
   }
 });
 
+// Clear a director's approval for a specific meeting
+router.post('/:id/meetings/:meetingId/clear-approval', async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    const { directorName } = req.body;
+
+    if (!directorName) {
+      return res.status(400).json({ error: 'Director name is required' });
+    }
+
+    await dbHelpers.clearApproval(meetingId, directorName);
+
+    // Get updated review
+    const { id } = req.params;
+    const review = await dbHelpers.getReview(id);
+
+    res.json({
+      success: true,
+      message: 'Approval cleared',
+      review
+    });
+  } catch (error) {
+    console.error('Error clearing approval:', error);
+    res.status(500).json({ error: 'Failed to clear approval' });
+  }
+});
+
 // Get status summary
 router.get('/:id/status', async (req, res) => {
   try {

@@ -465,6 +465,36 @@ const dbHelpers = {
     });
   },
 
+  // Clear/delete a director's approval for a specific meeting
+  clearApproval: (meetingId, directorName) => {
+    return new Promise(async (resolve, reject) => {
+      if (USE_POSTGRES) {
+        try {
+          const result = await pool.query(
+            'DELETE FROM approvals WHERE meeting_id = $1 AND director_name = $2',
+            [meetingId, directorName]
+          );
+          console.log(`[DB] Cleared approval for director "${directorName}" on meeting ${meetingId}`);
+          resolve({ deleted: result.rowCount });
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        db.run(
+          'DELETE FROM approvals WHERE meeting_id = ? AND director_name = ?',
+          [meetingId, directorName],
+          function(err) {
+            if (err) reject(err);
+            else {
+              console.log(`[DB] Cleared approval for director "${directorName}" on meeting ${meetingId}`);
+              resolve({ deleted: this.changes });
+            }
+          }
+        );
+      }
+    });
+  },
+
   // Update meeting description
   updateMeetingDescription: (meetingId, description) => {
     return new Promise(async (resolve, reject) => {

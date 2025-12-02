@@ -64,6 +64,27 @@ const DirectorReviewView = ({ reviewId }) => {
     }
   };
 
+  const clearMyResponse = async (meetingId) => {
+    if (!window.confirm('Are you sure you want to clear your response for this meeting?')) {
+      return;
+    }
+
+    try {
+      await fetch(`${API_URL}/api/reviews/${reviewId}/meetings/${meetingId}/clear-approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directorName })
+      });
+      // Clear changing decision state
+      setChangingDecisionId(null);
+      // Refresh review
+      fetchReview();
+    } catch (error) {
+      console.error('Error clearing approval:', error);
+      alert('Failed to clear response');
+    }
+  };
+
   const updateMeetingDescription = async (meetingId, newDescription) => {
     try {
       const response = await fetch(`${API_URL}/api/reviews/${reviewId}/meetings/${meetingId}`, {
@@ -558,6 +579,23 @@ const DirectorReviewView = ({ reviewId }) => {
                           <MessageSquare className="w-4 h-4" />
                           Add Comment
                         </button>
+                        {myApproval && (
+                          <>
+                            <button
+                              onClick={() => clearMyResponse(meeting.id)}
+                              className="px-4 py-2 rounded-lg font-medium bg-orange-500 text-white hover:bg-orange-600 transition flex items-center gap-2 text-sm"
+                            >
+                              <X className="w-4 h-4" />
+                              Clear My Response
+                            </button>
+                            <button
+                              onClick={() => setChangingDecisionId(null)}
+                              className="text-xs text-gray-600 hover:text-gray-800"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        )}
                       </>
                     )}
                   </div>
