@@ -495,6 +495,36 @@ const dbHelpers = {
     });
   },
 
+  // Clear ALL approvals for a specific meeting
+  clearAllApprovalsForMeeting: (meetingId) => {
+    return new Promise(async (resolve, reject) => {
+      if (USE_POSTGRES) {
+        try {
+          const result = await pool.query(
+            'DELETE FROM approvals WHERE meeting_id = $1',
+            [meetingId]
+          );
+          console.log(`[DB] Cleared all approvals for meeting ${meetingId} (${result.rowCount} deleted)`);
+          resolve({ deleted: result.rowCount });
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        db.run(
+          'DELETE FROM approvals WHERE meeting_id = ?',
+          [meetingId],
+          function(err) {
+            if (err) reject(err);
+            else {
+              console.log(`[DB] Cleared all approvals for meeting ${meetingId} (${this.changes} deleted)`);
+              resolve({ deleted: this.changes });
+            }
+          }
+        );
+      }
+    });
+  },
+
   // Update meeting description
   updateMeetingDescription: (meetingId, description) => {
     return new Promise(async (resolve, reject) => {

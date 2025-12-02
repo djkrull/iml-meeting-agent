@@ -236,6 +236,41 @@ router.post('/:id/meetings/:meetingId/clear-approval', async (req, res) => {
   }
 });
 
+// Clear ALL approvals for a specific meeting (by program name and type)
+router.post('/:id/clear-meeting-approvals', async (req, res) => {
+  try {
+    const { id: reviewId } = req.params;
+    const { programName, meetingType } = req.body;
+
+    if (!programName || !meetingType) {
+      return res.status(400).json({ error: 'Program name and meeting type are required' });
+    }
+
+    console.log(`[CLEAR MEETING] Clearing all approvals for: ${meetingType} - ${programName}`);
+
+    // First find the meeting
+    const meetingInfo = await dbHelpers.getMeetingByCharacteristics(reviewId, programName, meetingType);
+
+    if (!meetingInfo) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    // Clear all approvals for this meeting
+    const result = await dbHelpers.clearAllApprovalsForMeeting(meetingInfo.id);
+
+    console.log(`[CLEAR MEETING] Cleared ${result.deleted} approval(s)`);
+
+    res.json({
+      success: true,
+      message: 'All approvals cleared for this meeting',
+      deleted: result.deleted
+    });
+  } catch (error) {
+    console.error('[CLEAR MEETING] Error:', error);
+    res.status(500).json({ error: 'Failed to clear meeting approvals', details: error.message });
+  }
+});
+
 // Get status summary
 router.get('/:id/status', async (req, res) => {
   try {

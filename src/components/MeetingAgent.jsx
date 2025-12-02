@@ -1263,6 +1263,79 @@ const MeetingAgent = () => {
     }
   };
 
+  // Sync single meeting with option to clear its approvals
+  const syncSingleMeeting = async (meeting, clearApprovals = false) => {
+    if (!currentReviewId) {
+      alert('No active review. Please share for director review first.');
+      return;
+    }
+
+    try {
+      // If clearApprovals, clear them first
+      if (clearApprovals && meeting.approvals && meeting.approvals.length > 0) {
+        const approvalsList = meeting.approvals
+          .map(a => `  • ${a.director_name}: ${a.status}`)
+          .join('\n');
+
+        if (!window.confirm(`This will clear the following approvals for "${meeting.type}":\n\n${approvalsList}\n\nAnd then sync the new time/date to director view.\n\nContinue?`)) {
+          return;
+        }
+
+        console.log('Clearing approvals for meeting:', meeting.type);
+        const clearResponse = await fetch(`${API_URL}/api/reviews/${currentReviewId}/clear-meeting-approvals`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            programName: meeting.programName,
+            meetingType: meeting.type
+          })
+        });
+
+        const clearResult = await clearResponse.json();
+        if (!clearResult.success) {
+          alert('Failed to clear approvals: ' + clearResult.error);
+          return;
+        }
+
+        console.log(`Cleared ${clearResult.deleted} approval(s)`);
+      }
+
+      // Now sync the meeting
+      console.log('Syncing meeting to director view:', meeting.type);
+      const syncResponse = await fetch(`${API_URL}/api/reviews/${currentReviewId}/sync-meeting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          programName: meeting.programName,
+          meetingType: meeting.type,
+          date: meeting.date.toISOString(),
+          time: meeting.time,
+          description: meeting.description
+        })
+      });
+
+      const syncResult = await syncResponse.json();
+
+      if (syncResult.changes > 0) {
+        // Update local meeting to remove approval badges
+        setMeetings(currentMeetings =>
+          currentMeetings.map(m =>
+            m.id === meeting.id
+              ? { ...m, approvals: [], approvedCount: 0, rejectedCount: 0 }
+              : m
+          )
+        );
+
+        alert(`✅ Successfully synced "${meeting.type}"!\n\n${clearApprovals ? `Cleared ${meeting.approvals.length} approval(s) and synced` : 'Synced'} new time to director view.\n\nDirectors will see: ${new Date(meeting.date).toLocaleDateString('sv-SE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${meeting.time}`);
+      } else {
+        alert(`⚠️ Meeting not found in director view.\n\nYou may need to use "Share for Director Review" to create a fresh review.`);
+      }
+    } catch (error) {
+      console.error('Error syncing meeting:', error);
+      alert('Failed to sync meeting. Make sure the server is running.');
+    }
+  };
+
   // Clean up corrupted meetings with placeholder names
   const cleanupCorruptedMeetings = async () => {
     const corruptedKeywords = ['Title', 'Untitled', 'TODO', 'TBD', 'TBA'];
@@ -2230,6 +2303,17 @@ const MeetingAgent = () => {
                             >
                               Already Scheduled
                             </button>
+
+                            {meeting.approvals && meeting.approvals.length > 0 && currentReviewId && (
+                              <button
+                                onClick={() => syncSingleMeeting(meeting, true)}
+                                className="px-4 py-2 rounded-lg font-medium bg-yellow-600 text-white hover:bg-yellow-700 transition text-sm flex items-center gap-2"
+                                title="Clear approvals for this meeting and sync new time to directors"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                Sync & Clear Approvals
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
