@@ -206,7 +206,7 @@ const MeetingAgent = () => {
       },
       {
         name: 'Onboarding meeting',
-        leadTime: 3, // Friday after program start
+        leadTime: -4, // Friday before program start
         weekday: 5, // Friday
         participants: ['Admin Team', 'Organizers', 'Directors'],
         duration: 30,
@@ -214,7 +214,7 @@ const MeetingAgent = () => {
       },
       {
         name: 'Program Start Meeting',
-        leadTime: 4, // Tuesday after program start
+        leadTime: 0, // On program start day
         weekday: 2, // Tuesday
         time: '09:00',
         participants: ['Program Organizers', 'All Participants', 'Directors'],
