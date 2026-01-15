@@ -206,7 +206,7 @@ const MeetingAgent = () => {
       },
       {
         name: 'Onboarding meeting',
-        leadTime: -4, // Friday before program start
+        leadTime: -5, // Friday before program start
         weekday: 5, // Friday
         participants: ['Admin Team', 'Organizers', 'Directors'],
         duration: 30,
@@ -215,8 +215,6 @@ const MeetingAgent = () => {
       {
         name: 'Program Start Meeting',
         leadTime: 0, // On program start day
-        weekday: 2, // Tuesday
-        time: '09:00',
         participants: ['Program Organizers', 'All Participants', 'Directors'],
         duration: 30,
         description: 'Official program kickoff'
@@ -714,12 +712,8 @@ const MeetingAgent = () => {
         // Calculate days difference
         let daysToAdd = weekday - currentDay;
 
-        // If we need to go backwards (e.g., from Sunday to Friday), go to previous week's target day
-        if (daysToAdd > 3) {
-          daysToAdd -= 7;
-        }
-        // If we need to go far forward, go to next week's target day
-        else if (daysToAdd < -3) {
+        // If the difference is negative or would go backwards, go to next week's target day
+        if (daysToAdd <= 0) {
           daysToAdd += 7;
         }
 
