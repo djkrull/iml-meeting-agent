@@ -557,7 +557,7 @@ const MeetingAgent = () => {
             (meetingType.name.includes('Introduction Meeting') || meetingType.name.includes('Check-in Meeting') ||
              meetingType.name.includes('Check-in meeting'))) {
 
-          const meetingKey = `${program.type}_${meetingType.name}_${meetingType.leadTime}`;
+          const meetingKey = `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.name}_${meetingType.leadTime}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
             // Calculate date based on earliest summer conference
