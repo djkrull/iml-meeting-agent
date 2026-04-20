@@ -75,7 +75,7 @@ const MeetingAgent = () => {
     };
 
     loadFromBackend();
-  }, []); // Only run on mount
+  }, [initialLoadComplete]); // Only run on mount
 
   // Auto-refresh director approvals on page load and every 30 seconds
   useEffect(() => {
