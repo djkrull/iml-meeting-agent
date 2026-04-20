@@ -586,6 +586,19 @@ const MeetingAgent = () => {
 
             if (meetingDate) {
               summerConferenceMeetings.set(meetingKey, true);
+
+              let organizers = program.organizer;
+
+              // For Summer Conferences, collect all organizers from the same year
+              if (program.type === 'Summer Conference') {
+                const currentYear = program.startDate.getFullYear();
+                const allOrganizersList = programList
+                  .filter(p => p.type === 'Summer Conference' && p.startDate.getFullYear() === currentYear)
+                  .map(p => p.organizer)
+                  .filter((org, idx, self) => self.indexOf(org) === idx); // Unique
+                organizers = allOrganizersList.join(' / ');
+              }
+
               const groupName = program.type === 'Kleindagarna' ? 'Kleindagarna 2026' : 'All Summer Conferences';
               generatedMeetings.push({
                 id: meetingId++,
@@ -593,7 +606,7 @@ const MeetingAgent = () => {
                 programName: groupName,
                 programType: program.type,
                 programYear: program.startDate.getFullYear(),
-                programOrganizer: program.organizer,
+                programOrganizer: organizers,
                 type: meetingType.name,
                 date: meetingDate,
                 time: meetingType.time || '14:00',
