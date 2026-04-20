@@ -620,13 +620,12 @@ const MeetingAgent = () => {
           }
           return; // Skip individual meeting creation
         }
-        if (meetingType.recurring === 'weekly' && program.endDate && program.type === 'Summer Conference') {
-          // Generate weekly recurring meetings ONLY for Summer Conferences
-          // And limit to actual conference duration (typically 1 week)
+        if (meetingType.recurring === 'weekly' && program.endDate) {
+          // Generate weekly recurring meetings for all program types
           let currentDate = new Date(program.startDate);
-          const maxWeeks = 2; // Maximum 2 weeks of weekly meetings
-          let weekCount = 0;
+          const maxWeeks = program.type === 'Summer Conference' ? 2 : 52; // Limit summer to 2 weeks, others up to 1 year
 
+          let weekCount = 0;
           while (currentDate <= program.endDate && weekCount < maxWeeks) {
             if (currentDate.getDay() === meetingType.weekday) {
               generatedMeetings.push({
@@ -1615,21 +1614,6 @@ const MeetingAgent = () => {
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-  };
-
-  // Get Friday in specified week and year
-  const getFridayInWeek = (year, weekNumber) => {
-    const simple = new Date(year, 0, 1 + (weekNumber - 1) * 7);
-    const dow = simple.getDay();
-    const ISOweekStart = simple;
-    if (dow <= 4)
-      ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
-    else
-      ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
-
-    const friday = new Date(ISOweekStart);
-    friday.setDate(ISOweekStart.getDate() + 4);
-    return friday;
   };
 
   // Find suggested time from previous year (week-based matching)
