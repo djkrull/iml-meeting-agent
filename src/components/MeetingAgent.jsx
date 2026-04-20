@@ -560,14 +560,45 @@ const MeetingAgent = () => {
           const meetingKey = `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.name}_${meetingType.leadTime}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
-            // Calculate date based on earliest summer conference
-            let meetingDate = calculateMeetingDate(
-              program.startDate,
-              program.endDate,
-              meetingType.leadTime,
-              meetingType.weekday,
-              program.type
-            );
+            let meetingDate = null;
+
+            // For Summer Conference meetings, use week-based mapping from previous year
+            if (program.type === 'Summer Conference') {
+              const currentYear = program.startDate.getFullYear();
+              const previousYear = currentYear - 1;
+
+              // Find same meeting type from previous year
+              const previousYearMeeting = meetings.find(m => {
+                if (m.date.getFullYear() !== previousYear) return false;
+                if (m.type !== meetingType.name) return false;
+                return m.programName === 'All Summer Conferences';
+              });
+
+              if (previousYearMeeting) {
+                // Get week number from previous year
+                const weekNum = getWeekNumber(previousYearMeeting.date);
+                // Get Friday in same week for current year
+                meetingDate = getFridayInWeek(currentYear, weekNum);
+              } else {
+                // Fallback to old logic if no previous year data
+                meetingDate = calculateMeetingDate(
+                  program.startDate,
+                  program.endDate,
+                  meetingType.leadTime,
+                  meetingType.weekday,
+                  program.type
+                );
+              }
+            } else {
+              // For Kleindagarna, use original logic
+              meetingDate = calculateMeetingDate(
+                program.startDate,
+                program.endDate,
+                meetingType.leadTime,
+                meetingType.weekday,
+                program.type
+              );
+            }
 
             if (meetingDate) {
               summerConferenceMeetings.set(meetingKey, true);
@@ -1569,6 +1600,30 @@ const MeetingAgent = () => {
   };
 
   // Detect meeting conflicts (same date and time)
+  // Get ISO week number for a date
+  const getWeekNumber = (date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  };
+
+  // Get Friday in specified week and year
+  const getFridayInWeek = (year, weekNumber) => {
+    const simple = new Date(year, 0, 1 + (weekNumber - 1) * 7);
+    const dow = simple.getDay();
+    const ISOweekStart = simple;
+    if (dow <= 4)
+      ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+    else
+      ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+
+    const friday = new Date(ISOweekStart);
+    friday.setDate(ISOweekStart.getDate() + 4);
+    return friday;
+  };
+
   // Find suggested time from previous year
   const getSuggestedTimeFromPreviousYear = (meeting) => {
     const meetingYear = meeting.date.getFullYear();
