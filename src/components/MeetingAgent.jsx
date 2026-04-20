@@ -97,9 +97,20 @@ const MeetingAgent = () => {
         // Merge approval data with existing meetings
         setMeetings(currentMeetings => {
           return currentMeetings.map(meeting => {
-            const dbMeeting = review.meetings.find(m =>
-              m.program_name === meeting.programName && m.type === meeting.type
-            );
+            const dbMeeting = review.meetings.find(m => {
+              // Must match program name and type
+              if (m.program_name !== meeting.programName || m.type !== meeting.type) return false;
+
+              // For "All Summer Conferences", also match by year
+              if (meeting.programName === 'All Summer Conferences') {
+                const dbYear = new Date(m.date).getFullYear();
+                const meetingYear = meeting.date.getFullYear();
+                return dbYear === meetingYear;
+              }
+
+              // For other programs, match works fine (unique per year typically)
+              return true;
+            });
 
             if (dbMeeting) {
               const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -1020,10 +1031,21 @@ const MeetingAgent = () => {
       // Update meetings with approval counts from the database
       setMeetings(prevMeetings => {
         return prevMeetings.map(meeting => {
-          // Match by characteristics (program_name + type) instead of meeting_id
-          const dbMeeting = reviewData.meetings.find(m =>
-            m.program_name === meeting.programName && m.type === meeting.type
-          );
+          // Match by characteristics (program_name + type) with year check for Summer Conferences
+          const dbMeeting = reviewData.meetings.find(m => {
+            // Must match program name and type
+            if (m.program_name !== meeting.programName || m.type !== meeting.type) return false;
+
+            // For "All Summer Conferences", also match by year
+            if (meeting.programName === 'All Summer Conferences') {
+              const dbYear = new Date(m.date).getFullYear();
+              const meetingYear = meeting.date.getFullYear();
+              return dbYear === meetingYear;
+            }
+
+            // For other programs, match works fine
+            return true;
+          });
 
           if (dbMeeting) {
             const approvedCount = dbMeeting.approvals?.filter(a =>
