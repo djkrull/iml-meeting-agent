@@ -31,6 +31,44 @@ if (USE_POSTGRES) {
   });
 }
 
+// Ensure a proper UNIQUE CONSTRAINT exists on a table. Drops any matching
+// plain UNIQUE INDEX first (indexes can't be used with ON CONFLICT ON CONSTRAINT).
+async function ensureUniqueConstraint(poolInstance, table, name, columnsSql) {
+  try {
+    const check = await poolInstance.query(
+      `SELECT 1 FROM pg_constraint WHERE conname = $1`, [name]
+    );
+    if (check.rows.length > 0) {
+      console.log(`Constraint ${name} already exists`);
+      return;
+    }
+
+    // Drop any plain index with the same name (leftover from older deployments)
+    await poolInstance.query(`DROP INDEX IF EXISTS ${name}`);
+
+    // Remove duplicate rows before adding the constraint
+    if (table === 'programs') {
+      await poolInstance.query(`
+        DELETE FROM programs a USING programs b
+        WHERE a.id > b.id AND a.name = b.name AND a.type = b.type AND COALESCE(a.year, 0) = COALESCE(b.year, 0)
+      `);
+    } else if (table === 'program_meetings') {
+      await poolInstance.query(`
+        DELETE FROM program_meetings a USING program_meetings b
+        WHERE a.id > b.id AND a.program_name = b.program_name AND a.type = b.type AND a.date = b.date AND a.time = b.time
+      `);
+    }
+
+    await poolInstance.query(
+      `ALTER TABLE ${table} ADD CONSTRAINT ${name} UNIQUE ${columnsSql}`
+    );
+    console.log(`Added UNIQUE CONSTRAINT ${name} on ${table}`);
+  } catch (err) {
+    console.error(`Failed to ensure constraint ${name}:`, err.message);
+    throw err;
+  }
+}
+
 // Create tables for PostgreSQL
 async function initializePostgresDatabase() {
   try {
@@ -142,27 +180,13 @@ async function initializePostgresDatabase() {
       console.log('Migration note (program_id):', migrationError.message);
     }
 
-    // Migration: Add unique constraint to prevent meeting duplicates
-    try {
-      await pool.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS program_meetings_unique_idx
-        ON program_meetings (program_name, type, date, time)
-      `);
-      console.log('Added unique constraint for program_meetings');
-    } catch (migrationError) {
-      console.log('Migration note (meeting unique constraint):', migrationError.message);
-    }
-
-    // Migration: Add unique constraint to prevent program duplicates
-    try {
-      await pool.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS programs_unique_idx
-        ON programs (name, type, COALESCE(year, 0))
-      `);
-      console.log('Added unique constraint for programs');
-    } catch (migrationError) {
-      console.log('Migration note (program unique constraint):', migrationError.message);
-    }
+    // Migration: Ensure unique CONSTRAINTS exist (not just indexes).
+    // ON CONFLICT ON CONSTRAINT requires an actual named CONSTRAINT, not a plain
+    // UNIQUE INDEX — this caused silent INSERT failures in production previously.
+    await ensureUniqueConstraint(pool, 'program_meetings', 'program_meetings_unique_idx',
+      '(program_name, type, date, time)');
+    await ensureUniqueConstraint(pool, 'programs', 'programs_unique_idx',
+      '(name, type, year)');
 
     console.log('PostgreSQL tables initialized');
   } catch (error) {

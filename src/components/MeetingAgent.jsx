@@ -170,11 +170,13 @@ const MeetingAgent = () => {
           const data = await response.json();
           console.log('Saved to backend:', data);
         } else {
-          console.error('Failed to save to backend:', response.status);
+          const errorBody = await response.text();
+          console.error('Failed to save to backend:', response.status, errorBody);
+          alert(`⚠️ FAILED TO SAVE TO DATABASE (HTTP ${response.status})\n\nYour changes are only in the browser. Details:\n${errorBody.slice(0, 300)}`);
         }
       } catch (error) {
         console.error('Error saving to backend:', error);
-        // Fall back to localStorage if backend fails
+        alert(`⚠️ NETWORK ERROR saving to database\n\nYour changes are only in the browser. Error: ${error.message}`);
         localStorage.setItem('iml-programs', JSON.stringify(programs));
         localStorage.setItem('iml-meetings', JSON.stringify(meetings));
       }
