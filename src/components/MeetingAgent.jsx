@@ -557,7 +557,11 @@ const MeetingAgent = () => {
             (meetingType.name.includes('Introduction Meeting') || meetingType.name.includes('Check-in Meeting') ||
              meetingType.name.includes('Check-in meeting'))) {
 
-          const meetingKey = `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.name}_${meetingType.leadTime}`;
+          // Use year-based key for Summer Conferences (same meeting across all conferences)
+          // Use program-specific key for Kleindagarna (year-specific)
+          const meetingKey = program.type === 'Summer Conference'
+            ? `${program.type}_year${program.startDate.getFullYear()}_${meetingType.name}`
+            : `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.name}_${meetingType.leadTime}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
             let meetingDate = null;
