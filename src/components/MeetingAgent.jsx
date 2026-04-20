@@ -1628,30 +1628,32 @@ const MeetingAgent = () => {
     return friday;
   };
 
-  // Find suggested time from previous year
+  // Find suggested time from previous year (week-based matching)
   const getSuggestedTimeFromPreviousYear = (meeting) => {
     const meetingYear = meeting.date.getFullYear();
     const previousYear = meetingYear - 1;
+    const currentWeek = getWeekNumber(meeting.date);
 
-    // Find similar meeting from previous year
+    // Find similar meeting from previous year using week-based matching
     const previousYearMeeting = meetings.find(m => {
       if (m.date.getFullYear() !== previousYear) return false;
       if (m.type !== meeting.type) return false;
 
-      // For "All Summer Conferences" meetings, match by type and month/season
+      // For "All Summer Conferences" meetings, match by week number
       if (meeting.programName === 'All Summer Conferences') {
-        // Match if both are "All Summer Conferences" meetings with same type
         if (m.programName === 'All Summer Conferences') {
-          // Match by month (e.g., both in January for intro meetings)
-          const currentMonth = meeting.date.getMonth();
-          const prevMonth = m.date.getMonth();
-          return Math.abs(currentMonth - prevMonth) <= 1; // Allow 1-month variation
+          const prevMeetingWeek = getWeekNumber(m.date);
+          return prevMeetingWeek === currentWeek;
         }
         return false;
       }
 
-      // For regular program meetings, match by organizer
-      return m.programOrganizer === meeting.programOrganizer;
+      // For regular program meetings, match by organizer and week
+      if (m.programOrganizer === meeting.programOrganizer) {
+        const prevMeetingWeek = getWeekNumber(m.date);
+        return Math.abs(prevMeetingWeek - currentWeek) <= 2; // Allow 2-week variation
+      }
+      return false;
     });
 
     if (!previousYearMeeting) return null;
