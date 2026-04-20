@@ -400,15 +400,22 @@ const MeetingAgent = () => {
         // Determine program type based on name and dates
         let type = 'Spring Program'; // Default
 
+        // Check if this is a short program (< 30 days) — then it's a Summer Conference
+        const durationDays = startDate && endDate
+          ? Math.round((endDate - startDate) / (1000 * 60 * 60 * 24))
+          : 999;
+        const isShortProgram = durationDays < 30;
+
         if (row['Program']?.toLowerCase().includes('klein')) {
           type = 'Kleindagarna';
         } else if (row['Program']?.toLowerCase().includes('summer school') ||
-                   dateStr?.includes('juni') || dateStr?.includes('juli')) {
+                   dateStr?.includes('juni') || dateStr?.includes('juli') ||
+                   (isShortProgram && startDate && startDate.getMonth() >= 4 && startDate.getMonth() <= 7)) {
+          // Short programs in May-August are Summer Conferences regardless of month
           type = 'Summer Conference';
         } else if (startDate) {
-          // Determine Spring or Fall based on start month
+          // Long (multi-month) programs: Spring or Fall based on start month
           const startMonth = startDate.getMonth();
-          // Spring: Jan-May (0-4), Fall: Aug-Dec (7-11)
           if (startMonth >= 0 && startMonth <= 4) {
             type = 'Spring Program';
           } else if (startMonth >= 7 && startMonth <= 11) {
@@ -431,11 +438,17 @@ const MeetingAgent = () => {
       console.log('All parsed programs before filtering:', parsedPrograms.length);
 
       // Filter out board meetings and other non-program events
-      const excludedPrograms = ['styrelsemöte', 'prefektmöte', 'board meeting', 'acta editorial'];
+      const excludedPrograms = ['styrelsemöte', 'prefektmöte', 'board meeting', 'acta editorial', 'minneshögtid'];
       const filteredPrograms = parsedPrograms.filter(p => {
         // Exclude board meetings and similar
         if (p.name && excludedPrograms.some(excluded => p.name.toLowerCase().includes(excluded))) {
           console.log(`Excluding non-program event: ${p.name}`);
+          return false;
+        }
+        // Exclude placeholder entries
+        if (p.name === 'Title' || p.name === 'TBD' || p.name === 'Unnamed Program' ||
+            p.organizer === 'Organizer' || p.organizer === 'TBD') {
+          console.log(`Excluding placeholder program: ${p.name}`);
           return false;
         }
         // Filter out programs that have completely ended (keep ongoing and future)
