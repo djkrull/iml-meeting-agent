@@ -1579,20 +1579,35 @@ const MeetingAgent = () => {
       if (m.date.getFullYear() !== previousYear) return false;
       if (m.type !== meeting.type) return false;
 
-      // For "All Summer Conferences" meetings, match by name
+      // For "All Summer Conferences" meetings, match by type and month/season
       if (meeting.programName === 'All Summer Conferences') {
-        return m.programName === 'All Summer Conferences';
+        // Match if both are "All Summer Conferences" meetings with same type
+        if (m.programName === 'All Summer Conferences') {
+          // Match by month (e.g., both in January for intro meetings)
+          const currentMonth = meeting.date.getMonth();
+          const prevMonth = m.date.getMonth();
+          return Math.abs(currentMonth - prevMonth) <= 1; // Allow 1-month variation
+        }
+        return false;
       }
 
       // For regular program meetings, match by organizer
       return m.programOrganizer === meeting.programOrganizer;
     });
 
-    return previousYearMeeting ? {
+    if (!previousYearMeeting) return null;
+
+    return {
       date: previousYearMeeting.date,
       time: previousYearMeeting.time,
-      year: previousYear
-    } : null;
+      year: previousYear,
+      formattedDate: previousYearMeeting.date.toLocaleDateString('sv-SE', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })
+    };
   };
 
   const detectConflicts = () => {
@@ -1922,7 +1937,7 @@ const MeetingAgent = () => {
                                   )}
                                   {suggestion && (
                                     <div className="text-xs bg-blue-50 border border-blue-200 rounded p-2 mt-2 text-blue-700">
-                                      💡 <strong>Suggestion from {suggestion.year}:</strong> {new Date(suggestion.date).toLocaleDateString('sv-SE')} at {suggestion.time}
+                                      💡 <strong>Suggestion from {suggestion.year}:</strong> {suggestion.formattedDate} at {suggestion.time}
                                     </div>
                                   )}
                                 </div>
