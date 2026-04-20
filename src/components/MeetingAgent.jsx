@@ -1569,6 +1569,32 @@ const MeetingAgent = () => {
   };
 
   // Detect meeting conflicts (same date and time)
+  // Find suggested time from previous year
+  const getSuggestedTimeFromPreviousYear = (meeting) => {
+    const meetingYear = meeting.date.getFullYear();
+    const previousYear = meetingYear - 1;
+
+    // Find similar meeting from previous year
+    const previousYearMeeting = meetings.find(m => {
+      if (m.date.getFullYear() !== previousYear) return false;
+      if (m.type !== meeting.type) return false;
+
+      // For "All Summer Conferences" meetings, match by name
+      if (meeting.programName === 'All Summer Conferences') {
+        return m.programName === 'All Summer Conferences';
+      }
+
+      // For regular program meetings, match by organizer
+      return m.programOrganizer === meeting.programOrganizer;
+    });
+
+    return previousYearMeeting ? {
+      date: previousYearMeeting.date,
+      time: previousYearMeeting.time,
+      year: previousYear
+    } : null;
+  };
+
   const detectConflicts = () => {
     const conflicts = [];
     const timeSlots = new Map();
@@ -1883,17 +1909,25 @@ const MeetingAgent = () => {
                             </span>
                           </div>
                           <div className="ml-7 space-y-2">
-                            {conflict.meetings.map((meeting, mIdx) => (
-                              <div key={mIdx} className="text-sm text-gray-700 bg-red-50 p-3 rounded border border-red-200">
-                                <div className="font-semibold">{meeting.type}</div>
-                                <div className="text-gray-600">{meeting.programName}</div>
-                                {meeting.participants && meeting.participants.length > 0 && (
-                                  <div className="text-xs text-gray-500 mt-1">
-                                    Participants: {meeting.participants.join(', ')}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                            {conflict.meetings.map((meeting, mIdx) => {
+                              const suggestion = getSuggestedTimeFromPreviousYear(meeting);
+                              return (
+                                <div key={mIdx} className="text-sm text-gray-700 bg-red-50 p-3 rounded border border-red-200">
+                                  <div className="font-semibold">{meeting.type}</div>
+                                  <div className="text-gray-600">{meeting.programName}</div>
+                                  {meeting.participants && meeting.participants.length > 0 && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      Participants: {meeting.participants.join(', ')}
+                                    </div>
+                                  )}
+                                  {suggestion && (
+                                    <div className="text-xs bg-blue-50 border border-blue-200 rounded p-2 mt-2 text-blue-700">
+                                      💡 <strong>Suggestion from {suggestion.year}:</strong> {new Date(suggestion.date).toLocaleDateString('sv-SE')} at {suggestion.time}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
