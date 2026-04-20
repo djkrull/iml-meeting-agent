@@ -32,6 +32,28 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Cleanup corrupted programs (placeholder names, misclassified, etc.)
+router.post('/cleanup', async (req, res) => {
+  try {
+    const { programIds, programNames } = req.body;
+
+    if (!programIds && !programNames) {
+      return res.status(400).json({ error: 'Must provide programIds or programNames' });
+    }
+
+    const result = await dbHelpers.deletePrograms({ programIds, programNames });
+
+    res.status(200).json({
+      success: true,
+      deletedPrograms: result.deletedPrograms,
+      deletedMeetings: result.deletedMeetings
+    });
+  } catch (error) {
+    console.error('Error cleaning up programs:', error);
+    res.status(500).json({ error: 'Failed to cleanup programs', details: error.message });
+  }
+});
+
 // Get all programs and meetings
 router.get('/', async (req, res) => {
   try {

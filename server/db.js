@@ -1289,6 +1289,49 @@ const dbHelpers = {
         reject(err);
       }
     });
+  },
+
+  // Delete programs by name (and their meetings) - used for cleaning up placeholder/corrupted entries
+  deletePrograms: ({ programNames = [] }) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (programNames.length === 0) {
+          return resolve({ deletedPrograms: 0, deletedMeetings: 0 });
+        }
+
+        if (USE_POSTGRES) {
+          const meetingsResult = await pool.query(
+            `DELETE FROM program_meetings WHERE program_name = ANY($1::text[])`,
+            [programNames]
+          );
+          const programsResult = await pool.query(
+            `DELETE FROM programs WHERE name = ANY($1::text[])`,
+            [programNames]
+          );
+          resolve({
+            deletedPrograms: programsResult.rowCount,
+            deletedMeetings: meetingsResult.rowCount
+          });
+        } else {
+          const placeholders = programNames.map(() => '?').join(',');
+          db.serialize(() => {
+            let meetingsDeleted = 0;
+            let programsDeleted = 0;
+            db.run(`DELETE FROM program_meetings WHERE program_name IN (${placeholders})`, programNames, function(err) {
+              if (err) return reject(err);
+              meetingsDeleted = this.changes;
+              db.run(`DELETE FROM programs WHERE name IN (${placeholders})`, programNames, function(err) {
+                if (err) return reject(err);
+                programsDeleted = this.changes;
+                resolve({ deletedPrograms: programsDeleted, deletedMeetings: meetingsDeleted });
+              });
+            });
+          });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
   }
 };
 

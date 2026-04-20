@@ -467,10 +467,37 @@ const MeetingAgent = () => {
         return keep;
       });
 
-      console.log('Filtered programs:', filteredPrograms);
-      console.log(`Kept ${filteredPrograms.length} current/future programs (filtered out ${parsedPrograms.length - filteredPrograms.length})`);
-      setPrograms(filteredPrograms);
-      generateMeetings(filteredPrograms);
+      // Business rule: max 1 Spring Program + 1 Fall Program per year
+      // If multiple found, keep the longest (real multi-month program) and reclassify extras as Summer Conference
+      const reclassified = [...filteredPrograms];
+      ['Spring Program', 'Fall Program'].forEach(mainType => {
+        const byYear = {};
+        reclassified.forEach((p, idx) => {
+          if (p.type !== mainType || !p.year) return;
+          if (!byYear[p.year]) byYear[p.year] = [];
+          byYear[p.year].push({ p, idx });
+        });
+        Object.keys(byYear).forEach(year => {
+          const entries = byYear[year];
+          if (entries.length > 1) {
+            // Keep the longest one, reclassify others
+            entries.sort((a, b) => {
+              const durA = a.p.endDate ? (a.p.endDate - a.p.startDate) : 0;
+              const durB = b.p.endDate ? (b.p.endDate - b.p.startDate) : 0;
+              return durB - durA;
+            });
+            entries.slice(1).forEach(({ p, idx }) => {
+              console.log(`Reclassifying "${p.name}" from ${mainType} ${year} to Summer Conference (only 1 ${mainType} per year allowed)`);
+              reclassified[idx] = { ...p, type: 'Summer Conference' };
+            });
+          }
+        });
+      });
+
+      console.log('Filtered programs:', reclassified);
+      console.log(`Kept ${reclassified.length} current/future programs (filtered out ${parsedPrograms.length - reclassified.length})`);
+      setPrograms(reclassified);
+      generateMeetings(reclassified);
     } catch (error) {
       console.error('Error loading file:', error);
       alert(`Error loading Excel file: ${error.message}`);
@@ -1469,40 +1496,73 @@ const MeetingAgent = () => {
     }
   };
 
-  // Clean up corrupted meetings with placeholder names
+  // Clean up corrupted meetings with placeholder names AND remove corrupted programs from DB
   const cleanupCorruptedMeetings = async () => {
     const corruptedKeywords = ['Title', 'Untitled', 'TODO', 'TBD', 'TBA'];
 
-    const corrupted = meetings.filter(m =>
-      corruptedKeywords.some(keyword =>
-        m.programName === keyword ||
-        m.programName.toLowerCase().includes(keyword.toLowerCase())
-      )
+    // Find corrupted programs (placeholder names, unknown organizer)
+    const corruptedPrograms = programs.filter(p =>
+      corruptedKeywords.some(k => p.name === k || p.name.toLowerCase().includes(k.toLowerCase())) ||
+      p.organizer === 'Organizer' || p.organizer === 'TBD' ||
+      p.name.toLowerCase().includes('minneshögtid')
     );
 
-    if (corrupted.length === 0) {
-      alert('No corrupted meetings found! ✅');
+    // Also find Spring/Fall duplicates (per year should have max 1 of each)
+    const duplicates = [];
+    ['Spring Program', 'Fall Program'].forEach(type => {
+      const byYear = {};
+      programs.filter(p => p.type === type).forEach(p => {
+        if (!byYear[p.year]) byYear[p.year] = [];
+        byYear[p.year].push(p);
+      });
+      Object.values(byYear).forEach(list => {
+        if (list.length > 1) {
+          // Keep the longest, mark others as duplicates
+          list.sort((a, b) => {
+            const durA = a.endDate ? (new Date(a.endDate) - new Date(a.startDate)) : 0;
+            const durB = b.endDate ? (new Date(b.endDate) - new Date(b.startDate)) : 0;
+            return durB - durA;
+          });
+          duplicates.push(...list.slice(1));
+        }
+      });
+    });
+
+    const allToDelete = [...new Set([...corruptedPrograms, ...duplicates].map(p => p.name))];
+
+    if (allToDelete.length === 0) {
+      alert('No corrupted programs found! ✅');
       return;
     }
 
-    const corruptedList = corrupted
-      .map(m => `  • ${m.type} - ${m.programName} (${new Date(m.date).toISOString().split('T')[0]} ${m.time})`)
-      .join('\n');
+    const deleteList = allToDelete.map(n => `  • ${n}`).join('\n');
 
-    if (!window.confirm(`Found ${corrupted.length} corrupted meeting(s) with placeholder names:\n\n${corruptedList}\n\nDelete these meetings?`)) {
+    if (!window.confirm(`Found ${allToDelete.length} corrupted/duplicate program(s):\n\n${deleteList}\n\nDelete from database?`)) {
       return;
     }
 
-    // Remove corrupted meetings
-    const cleanMeetings = meetings.filter(m =>
-      !corruptedKeywords.some(keyword =>
-        m.programName === keyword ||
-        m.programName.toLowerCase().includes(keyword.toLowerCase())
-      )
-    );
+    try {
+      const response = await fetch(`${API_URL}/api/programs/cleanup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ programNames: allToDelete })
+      });
+      const result = await response.json();
 
-    setMeetings(cleanMeetings);
-    alert(`✅ Removed ${corrupted.length} corrupted meetings!\n${cleanMeetings.length} clean meetings remain.`);
+      if (result.success) {
+        // Also remove from local state
+        const cleanPrograms = programs.filter(p => !allToDelete.includes(p.name));
+        const cleanMeetings = meetings.filter(m => !allToDelete.includes(m.programName));
+        setPrograms(cleanPrograms);
+        setMeetings(cleanMeetings);
+        alert(`✅ Deleted ${result.deletedPrograms} program(s) and ${result.deletedMeetings} meeting(s) from database.`);
+      } else {
+        alert('Failed to clean: ' + (result.error || 'unknown error'));
+      }
+    } catch (error) {
+      console.error('Cleanup error:', error);
+      alert('Failed to cleanup. Check server connection.');
+    }
   };
 
   // Force reload from database
