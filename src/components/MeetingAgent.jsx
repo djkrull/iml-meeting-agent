@@ -445,9 +445,9 @@ const MeetingAgent = () => {
           console.log(`Excluding non-program event: ${p.name}`);
           return false;
         }
-        // Exclude placeholder entries
-        if (p.name === 'Title' || p.name === 'TBD' || p.name === 'Unnamed Program' ||
-            p.organizer === 'Organizer' || p.organizer === 'TBD') {
+        // Exclude placeholder entries (only based on name, not organizer — real conferences
+        // may have TBD organizer before they're fully confirmed)
+        if (p.name === 'Title' || p.name === 'TBD' || p.name === 'Unnamed Program') {
           console.log(`Excluding placeholder program: ${p.name}`);
           return false;
         }
@@ -1500,10 +1500,10 @@ const MeetingAgent = () => {
   const cleanupCorruptedMeetings = async () => {
     const corruptedKeywords = ['Title', 'Untitled', 'TODO', 'TBD', 'TBA'];
 
-    // Find corrupted programs (placeholder names, unknown organizer)
+    // Find corrupted programs (placeholder names only, NOT based on organizer alone
+    // since a real conference may have TBD organizer)
     const corruptedPrograms = programs.filter(p =>
-      corruptedKeywords.some(k => p.name === k || p.name.toLowerCase().includes(k.toLowerCase())) ||
-      p.organizer === 'Organizer' || p.organizer === 'TBD' ||
+      corruptedKeywords.some(k => p.name === k) ||
       p.name.toLowerCase().includes('minneshögtid')
     );
 
