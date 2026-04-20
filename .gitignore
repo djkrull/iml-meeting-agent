@@ -28,6 +28,9 @@ yarn-error.log*
 *.db
 *.db-journal
 
+# Local settings
+.claude/settings.local.json
+
 # Test/utility scripts with credentials
 server/test-db.js
 server/init-railway-db.js
