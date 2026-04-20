@@ -559,6 +559,26 @@ const MeetingAgent = () => {
     let meetingId = 1;
     const summerConferenceMeetings = new Map(); // Track shared summer conference meetings
 
+    // Build lookup of previous year's times (cyclical by program TYPE + meeting TYPE)
+    // Key: "{programType}|{meetingTypeName}|{year}" -> time
+    const previousYearTimes = new Map();
+    meetings.forEach(m => {
+      const year = m.date instanceof Date ? m.date.getFullYear() : new Date(m.date).getFullYear();
+      const key = `${m.programType}|${m.type}|${year}`;
+      previousYearTimes.set(key, m.time);
+    });
+
+    // Look up time from any previous year (falls back to default)
+    const getInheritedTime = (programType, meetingTypeName, currentYear, defaultTime) => {
+      for (let y = currentYear - 1; y >= currentYear - 5; y--) {
+        const key = `${programType}|${meetingTypeName}|${y}`;
+        if (previousYearTimes.has(key)) {
+          return previousYearTimes.get(key);
+        }
+      }
+      return defaultTime;
+    };
+
     programList.forEach(program => {
       const programMeetings = meetingTypes[program.type] || [];
 
@@ -600,6 +620,12 @@ const MeetingAgent = () => {
               }
 
               const groupName = program.type === 'Kleindagarna' ? 'Kleindagarna 2026' : 'All Summer Conferences';
+              const inheritedTime = getInheritedTime(
+                program.type,
+                meetingType.name,
+                program.startDate.getFullYear(),
+                meetingType.time || '14:00'
+              );
               generatedMeetings.push({
                 id: meetingId++,
                 programId: program.type === 'Kleindagarna' ? 'kleindagarna-2026' : 'all-summer',
@@ -609,7 +635,7 @@ const MeetingAgent = () => {
                 programOrganizer: organizers,
                 type: meetingType.name,
                 date: meetingDate,
-                time: meetingType.time || '14:00',
+                time: inheritedTime,
                 duration: meetingType.duration,
                 participants: meetingType.participants,
                 description: meetingType.description,
@@ -628,6 +654,12 @@ const MeetingAgent = () => {
           let weekCount = 0;
           while (currentDate <= program.endDate && weekCount < maxWeeks) {
             if (currentDate.getDay() === meetingType.weekday) {
+              const inheritedTime = getInheritedTime(
+                program.type,
+                meetingType.name,
+                program.startDate.getFullYear(),
+                meetingType.time || '09:00'
+              );
               generatedMeetings.push({
                 id: meetingId++,
                 programId: program.id,
@@ -637,7 +669,7 @@ const MeetingAgent = () => {
                 programOrganizer: program.organizer,
                 type: meetingType.name,
                 date: new Date(currentDate),
-                time: meetingType.time || '09:00',
+                time: inheritedTime,
                 duration: meetingType.duration,
                 participants: meetingType.participants,
                 description: meetingType.description,
@@ -659,6 +691,12 @@ const MeetingAgent = () => {
           );
 
           if (meetingDate) {
+            const inheritedTime = getInheritedTime(
+              program.type,
+              meetingType.name,
+              program.startDate.getFullYear(),
+              meetingType.time || '14:00'
+            );
             generatedMeetings.push({
               id: meetingId++,
               programId: program.id,
@@ -668,7 +706,7 @@ const MeetingAgent = () => {
               programOrganizer: program.organizer,
               type: meetingType.name,
               date: meetingDate,
-              time: meetingType.time || '14:00',
+              time: inheritedTime,
               duration: meetingType.duration,
               participants: meetingType.participants,
               description: meetingType.description,
