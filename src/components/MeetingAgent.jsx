@@ -275,7 +275,7 @@ const MeetingAgent = () => {
         name: 'Introduction Meeting - Group 1',
         leadTime: -240, // 8 months before
         weekday: 5, // Friday
-        time: '10:00',
+        time: '11:00',
         participants: ['Conference Organizer Group 1', 'Admin Team', 'Directors'],
         duration: 30,
         description: 'Initial planning for first conference group'
@@ -284,7 +284,7 @@ const MeetingAgent = () => {
         name: 'Introduction Meeting - Group 2',
         leadTime: -240, // Same day as Group 1, right after
         weekday: 5, // Friday
-        time: '15:00',
+        time: '11:30',
         participants: ['Conference Organizer Group 2', 'Admin Team', 'Directors'],
         duration: 30,
         description: 'Initial planning for second conference group'
@@ -293,7 +293,7 @@ const MeetingAgent = () => {
         name: 'Check-in Meeting - Group 1',
         leadTime: -90, // 3 months before
         weekday: 5, // Friday
-        time: '10:00',
+        time: '11:00',
         participants: ['Conference Organizer Group 1', 'Admin Team'],
         duration: 30,
         description: 'Pre-conference preparations review'
@@ -302,7 +302,7 @@ const MeetingAgent = () => {
         name: 'Check-in Meeting - Group 2',
         leadTime: -90, // Same day as Group 1, right after
         weekday: 5, // Friday
-        time: '15:00',
+        time: '11:30',
         participants: ['Conference Organizer Group 2', 'Admin Team'],
         duration: 30,
         description: 'Pre-conference preparations review'
