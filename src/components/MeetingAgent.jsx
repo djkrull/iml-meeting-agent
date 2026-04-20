@@ -575,45 +575,14 @@ const MeetingAgent = () => {
             : `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.name}_${meetingType.leadTime}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
-            let meetingDate = null;
-
-            // For Summer Conference meetings, use week-based mapping from previous year
-            if (program.type === 'Summer Conference') {
-              const currentYear = program.startDate.getFullYear();
-              const previousYear = currentYear - 1;
-
-              // Find same meeting type from previous year
-              const previousYearMeeting = meetings.find(m => {
-                if (m.date.getFullYear() !== previousYear) return false;
-                if (m.type !== meetingType.name) return false;
-                return m.programName === 'All Summer Conferences';
-              });
-
-              if (previousYearMeeting) {
-                // Get week number from previous year
-                const weekNum = getWeekNumber(previousYearMeeting.date);
-                // Get Friday in same week for current year
-                meetingDate = getFridayInWeek(currentYear, weekNum);
-              } else {
-                // Fallback to old logic if no previous year data
-                meetingDate = calculateMeetingDate(
-                  program.startDate,
-                  program.endDate,
-                  meetingType.leadTime,
-                  meetingType.weekday,
-                  program.type
-                );
-              }
-            } else {
-              // For Kleindagarna, use original logic
-              meetingDate = calculateMeetingDate(
-                program.startDate,
-                program.endDate,
-                meetingType.leadTime,
-                meetingType.weekday,
-                program.type
-              );
-            }
+            // Calculate date using original logic
+            let meetingDate = calculateMeetingDate(
+              program.startDate,
+              program.endDate,
+              meetingType.leadTime,
+              meetingType.weekday,
+              program.type
+            );
 
             if (meetingDate) {
               summerConferenceMeetings.set(meetingKey, true);
