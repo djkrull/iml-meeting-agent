@@ -94,6 +94,10 @@ const springFallMeetings = [
 ];
 
 const summerConferenceMeetings = [
+  { name: 'Introduction Meeting - Group 1', leadTime: -240, weekday: 5, time: '11:00', participants: ['Conference Organizer Group 1', 'Admin Team', 'Directors'], duration: 30, description: 'Initial planning for first conference group' },
+  { name: 'Introduction Meeting - Group 2', leadTime: -240, weekday: 5, time: '11:30', participants: ['Conference Organizer Group 2', 'Admin Team', 'Directors'], duration: 30, description: 'Initial planning for second conference group' },
+  { name: 'Check-in Meeting - Group 1', leadTime: -90, weekday: 5, time: '11:00', participants: ['Conference Organizer Group 1', 'Admin Team'], duration: 30, description: 'Pre-conference preparations review' },
+  { name: 'Check-in Meeting - Group 2', leadTime: -90, weekday: 5, time: '11:30', participants: ['Conference Organizer Group 2', 'Admin Team'], duration: 30, description: 'Pre-conference preparations review' },
   { name: 'Weekly Onboarding meeting light', leadTime: 0, recurring: 'weekly', weekday: 1, time: '09:30', participants: ['Organizers', 'Admin Team'], duration: 30, description: 'Weekly orientation for new participants' },
   { name: 'Weekly Welcome Meeting', leadTime: 0, recurring: 'weekly', weekday: 1, time: '10:00', participants: ['All Conference Participants'], duration: 15, description: 'Weekly welcome and updates' }
 ];
@@ -207,6 +211,32 @@ async function main() {
                  : [];
 
       defs.forEach(mt => {
+        // Summer Conference Introduction / Check-in Group meetings are SHARED per year
+        // (one meeting covers all summer conferences that year). Only create once per (year, type).
+        if (program.type === 'Summer Conference' &&
+            (mt.name.includes('Introduction Meeting') || mt.name.includes('Check-in Meeting'))) {
+          const key = `summer_${program.year}_${mt.name}`;
+          if (sharedKeys.has(key)) return;
+          sharedKeys.add(key);
+
+          // Use earliest summer conference of the year as reference date
+          const sameYearSCs = programs.filter(p => p.type === 'Summer Conference' && p.year === program.year);
+          const earliest = sameYearSCs.reduce((a, b) => a.startDate < b.startDate ? a : b);
+          const d = calcMeetingDate(earliest.startDate, earliest.endDate, mt.leadTime, mt.weekday, earliest.type);
+          if (d) {
+            const allOrgs = sameYearSCs.map(p => p.organizer).filter((o, i, s) => s.indexOf(o) === i).join(' / ');
+            meetings.push({
+              id: meetingId++, programId: program.year,
+              programName: 'All Summer Conferences', programType: 'Summer Conference',
+              programYear: program.year, programOrganizer: allOrgs,
+              type: mt.name, date: d, time: mt.time,
+              duration: mt.duration, participants: mt.participants,
+              description: mt.description
+            });
+          }
+          return;
+        }
+
         if (mt.recurring === 'weekly' && program.endDate) {
           // Weekly meetings
           const maxWeeks = program.type === 'Summer Conference' ? 2 : 52;
