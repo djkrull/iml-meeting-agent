@@ -10,6 +10,8 @@ const MONTHS = {
   'september': 8, 'oktober': 9, 'november': 10, 'december': 11
 };
 
+// Parse dates in LOCAL (Swedish/CET) time — matches the frontend's convention.
+// Using new Date(year, month, day) creates a date at local midnight.
 function parseDate(dateStr, year) {
   if (!dateStr) return null;
   const crossMonth = /^(\d{1,2})\s+(\w+)\s*[-–]\s*(\d{1,2})\s+(\w+)$/;
@@ -20,17 +22,17 @@ function parseDate(dateStr, year) {
   if ((m = dateStr.match(crossMonth))) {
     const m1 = MONTHS[m[2].toLowerCase()], m2 = MONTHS[m[4].toLowerCase()];
     if (m1 === undefined || m2 === undefined) return null;
-    return { start: new Date(Date.UTC(year, m1, +m[1])), end: new Date(Date.UTC(year, m2, +m[3])) };
+    return { start: new Date(year, m1, +m[1]), end: new Date(year, m2, +m[3]) };
   }
   if ((m = dateStr.match(dateRange))) {
     const mo = MONTHS[m[3].toLowerCase()];
     if (mo === undefined) return null;
-    return { start: new Date(Date.UTC(year, mo, +m[1])), end: new Date(Date.UTC(year, mo, +m[2])) };
+    return { start: new Date(year, mo, +m[1]), end: new Date(year, mo, +m[2]) };
   }
   if ((m = dateStr.match(singleDate))) {
     const mo = MONTHS[m[2].toLowerCase()];
     if (mo === undefined) return null;
-    const d = new Date(Date.UTC(year, mo, +m[1]));
+    const d = new Date(year, mo, +m[1]);
     return { start: d, end: d };
   }
   return null;
@@ -48,7 +50,7 @@ function categorize(name, dateStr, start, end) {
   const isLong = durDays >= 30;
 
   if (start) {
-    const mo = start.getUTCMonth();
+    const mo = start.getMonth();
     if (isLong || isCrossMonth) {
       if (mo >= 0 && mo <= 4) return 'Spring Program';
       if (mo >= 7 && mo <= 11) return 'Fall Program';
@@ -102,21 +104,21 @@ function calcMeetingDate(startDate, endDate, leadTime, weekday, programType) {
     if (programType === 'Spring Program' || programType === 'Fall Program') {
       if (!endDate) return null;
       let d = new Date(endDate);
-      const dow = d.getUTCDay();
+      const dow = d.getDay();
       if (dow === 5) return d;
-      if (dow === 6) { d.setUTCDate(d.getUTCDate() - 1); return d; }
-      d.setUTCDate(d.getUTCDate() - (dow === 0 ? 2 : dow + 2));
+      if (dow === 6) { d.setDate(d.getDate() - 1); return d; }
+      d.setDate(d.getDate() - (dow === 0 ? 2 : dow + 2));
       return d;
     }
   }
   const d = new Date(startDate.getTime());
-  d.setUTCDate(d.getUTCDate() + leadTime);
+  d.setDate(d.getDate() + leadTime);
   if (weekday !== undefined) {
-    const cur = d.getUTCDay();
+    const cur = d.getDay();
     if (cur !== weekday) {
       let add = weekday - cur;
       if (add <= 0) add += 7;
-      d.setUTCDate(d.getUTCDate() + add);
+      d.setDate(d.getDate() + add);
     }
   }
   return d;
@@ -211,7 +213,7 @@ async function main() {
           let cur = new Date(program.startDate);
           let wc = 0;
           while (cur <= program.endDate && wc < maxWeeks) {
-            if (cur.getUTCDay() === mt.weekday) {
+            if (cur.getDay() === mt.weekday) {
               meetings.push({
                 id: meetingId++, programId: program.year * 100 + programs.indexOf(program),
                 programName: program.name, programType: program.type,
@@ -222,7 +224,7 @@ async function main() {
               });
               wc++;
             }
-            cur.setUTCDate(cur.getUTCDate() + 1);
+            cur.setDate(cur.getDate() + 1);
           }
         } else if (!mt.recurring) {
           const d = calcMeetingDate(program.startDate, program.endDate, mt.leadTime, mt.weekday, program.type);
