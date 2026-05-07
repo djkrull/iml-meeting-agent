@@ -2382,6 +2382,12 @@ const MeetingAgent = () => {
               )}
 
               <div className="space-y-4">
+                {(() => {
+                  if (programFilter !== 'all') {
+                    console.log('[RENDER DEBUG] Rendering', filteredMeetings.length, 'meetings; first =', filteredMeetings[0] && {id: filteredMeetings[0].id, type: filteredMeetings[0].type, programName: filteredMeetings[0].programName});
+                  }
+                  return null;
+                })()}
                 {filteredMeetings.map(meeting => {
                   const isConflict = isConflictingMeeting(meeting);
                   return (
