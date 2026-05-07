@@ -19,6 +19,7 @@ const MeetingAgent = () => {
     'Kleindagarna': true,
     'Summer Conference': true
   });
+  const [programFilter, setProgramFilter] = useState('all'); // 'all' or specific programName
   const [editingMeeting, setEditingMeeting] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [reviewUrl, setReviewUrl] = useState(null);
@@ -1707,8 +1708,17 @@ const MeetingAgent = () => {
     }));
   };
 
-  // Filter meetings based on selected filters
-  const filteredMeetings = meetings.filter(m => filters[m.programType]);
+  // Filter meetings based on selected filters (type + specific program)
+  const filteredMeetings = meetings.filter(m => {
+    if (!filters[m.programType]) return false;
+    if (programFilter !== 'all' && m.programName !== programFilter) return false;
+    return true;
+  });
+
+  // Build sorted list of unique program names for the dropdown
+  const programNamesForFilter = Array.from(
+    new Set(meetings.map(m => m.programName).filter(Boolean))
+  ).sort();
 
   // Statistics
   const stats = {
@@ -2143,7 +2153,7 @@ const MeetingAgent = () => {
             {/* Filters */}
             <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
               <h2 className="text-xl font-bold text-gray-800 mb-4">Filter by Program Type</h2>
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-4 mb-4">
                 {Object.keys(filters).map(type => (
                   <label key={type} className="flex items-center cursor-pointer">
                     <input
@@ -2157,6 +2167,28 @@ const MeetingAgent = () => {
                     </span>
                   </label>
                 ))}
+              </div>
+
+              <h2 className="text-xl font-bold text-gray-800 mb-2">Filter by Program</h2>
+              <div className="flex items-center gap-3">
+                <select
+                  value={programFilter}
+                  onChange={(e) => setProgramFilter(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[300px]"
+                >
+                  <option value="all">All Programs</option>
+                  {programNamesForFilter.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                {programFilter !== 'all' && (
+                  <button
+                    onClick={() => setProgramFilter('all')}
+                    className="text-sm text-indigo-600 hover:text-indigo-800 underline"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
             </div>
 
