@@ -1711,7 +1711,17 @@ const MeetingAgent = () => {
   // Filter meetings based on selected filters (type + specific program)
   const filteredMeetings = meetings.filter(m => {
     if (!filters[m.programType]) return false;
-    if (programFilter !== 'all' && m.programName !== programFilter) return false;
+    if (programFilter !== 'all' && m.programName !== programFilter) {
+      // Debug: log meetings that fail the program filter (visible in DevTools console)
+      if (m.type === 'Evaluation meeting/lunch' && m.programName?.includes('Operator Algebras')) {
+        console.log('[FILTER DEBUG] Op Alg Eval rejected:', {
+          id: m.id, programName: m.programName, programFilter,
+          areEqual: m.programName === programFilter,
+          length: m.programName?.length, filterLength: programFilter?.length
+        });
+      }
+      return false;
+    }
     return true;
   });
 
