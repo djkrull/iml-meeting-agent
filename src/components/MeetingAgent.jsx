@@ -1708,25 +1708,20 @@ const MeetingAgent = () => {
     }));
   };
 
-  // Filter meetings based on selected filters (type + specific program)
-  const filteredMeetings = meetings.filter(m => {
-    if (!filters[m.programType]) return false;
-    if (programFilter !== 'all' && m.programName !== programFilter) return false;
-    return true;
-  });
+  // Filter meetings based on selected filters (type + specific program), sorted by date then time
+  const filteredMeetings = meetings
+    .filter(m => {
+      if (!filters[m.programType]) return false;
+      if (programFilter !== 'all' && m.programName !== programFilter) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime();
+      const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime();
+      if (dateA !== dateB) return dateA - dateB;
+      return (a.time || '').localeCompare(b.time || '');
+    });
 
-  // Debug: log filteredMeetings details whenever it changes
-  if (programFilter !== 'all') {
-    console.log('[FILTER DEBUG] programFilter =', programFilter);
-    console.log('[FILTER DEBUG] filteredMeetings count:', filteredMeetings.length);
-    const opAlg = filteredMeetings.filter(m => m.programName?.includes('Operator Algebras'));
-    if (opAlg.length > 0) {
-      console.log('[FILTER DEBUG] Op Alg PASSED filter:', opAlg);
-    } else {
-      console.log('[FILTER DEBUG] No Op Alg in filteredMeetings ✓');
-    }
-    console.log('[FILTER DEBUG] First 3 in filteredMeetings:', filteredMeetings.slice(0, 3).map(m => ({type: m.type, programName: m.programName, date: m.date})));
-  }
 
   // Build sorted list of unique program names for the dropdown
   const programNamesForFilter = Array.from(
