@@ -55,7 +55,7 @@ async function ensureUniqueConstraint(poolInstance, table, name, columnsSql) {
     } else if (table === 'program_meetings') {
       await poolInstance.query(`
         DELETE FROM program_meetings a USING program_meetings b
-        WHERE a.id > b.id AND a.program_name = b.program_name AND a.type = b.type AND a.date = b.date AND a.time = b.time
+        WHERE a.id > b.id AND a.program_name = b.program_name AND a.type = b.type AND a.date = b.date
       `);
     }
 
@@ -183,8 +183,11 @@ async function initializePostgresDatabase() {
     // Migration: Ensure unique CONSTRAINTS exist (not just indexes).
     // ON CONFLICT ON CONSTRAINT requires an actual named CONSTRAINT, not a plain
     // UNIQUE INDEX — this caused silent INSERT failures in production previously.
+    // Constraint excludes 'time' on purpose: same meeting on same date at different times
+    // is treated as the SAME meeting (prevents duplicate rows when times shift due to
+    // user edits or upload regeneration).
     await ensureUniqueConstraint(pool, 'program_meetings', 'program_meetings_unique_idx',
-      '(program_name, type, date, time)');
+      '(program_name, type, date)');
     await ensureUniqueConstraint(pool, 'programs', 'programs_unique_idx',
       '(name, type, year)');
 
