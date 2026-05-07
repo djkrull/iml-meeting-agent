@@ -1132,7 +1132,7 @@ const dbHelpers = {
             }
           }
 
-          // Insert new meetings only (skip existing)
+          // Upsert meetings — UPDATE on conflict so user-edited times/durations/etc. persist
           for (const meeting of meetings) {
             const meetingDate = typeof meeting.date === 'string'
               ? meeting.date
@@ -1143,7 +1143,15 @@ const dbHelpers = {
                 `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                  ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
-                 DO NOTHING`,
+                 DO UPDATE SET
+                   time = EXCLUDED.time,
+                   duration = EXCLUDED.duration,
+                   participants = EXCLUDED.participants,
+                   description = EXCLUDED.description,
+                   status = EXCLUDED.status,
+                   approved = EXCLUDED.approved,
+                   program_organizer = EXCLUDED.program_organizer,
+                   updated_at = EXCLUDED.updated_at`,
                 [meeting.id, meeting.programId, meeting.programName, meeting.programType,
                  meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
                  meeting.time, meeting.duration, JSON.stringify(meeting.participants),
@@ -1151,11 +1159,7 @@ const dbHelpers = {
               );
               meetingsInserted++;
             } catch (err) {
-              if (err.code === '23505') { // Unique violation - already exists
-                meetingsSkipped++;
-              } else {
-                throw err;
-              }
+              throw err;
             }
           }
 
