@@ -190,16 +190,25 @@ const MeetingAgent = () => {
   console.log('MeetingAgent component loaded');
 
   // Meeting type definitions
-  const springFallMeetings = [
-      {
-        name: 'Introduction Meeting',
-        leadTime: -540, // 18 months before (540 days)
-        weekday: 5, // Friday
-        time: '10:00',
-        participants: ['Program Organizers', 'Directors', 'Admin Coordinator'],
-        duration: 30,
-        description: 'Initial program planning and expectations'
-      },
+  // Introduction Meeting offsets are versioned by program-year. From FP28+/SP29+
+  // IML brings the kick-off forward 2 months (Mar -> Jan for FP, equivalent for SP).
+  // Older programs keep the original -540d offset.
+  // See: imlass/skills/iml-pp-tidsplan-info-organizers/SKILL.md (canonical timeline).
+  const introMeetingOld = {
+    name: 'Introduction Meeting',
+    leadTime: -540, // 18 months before — pre-FP28 / pre-SP29
+    weekday: 5,
+    time: '10:00',
+    participants: ['Program Organizers', 'Directors', 'Admin Coordinator'],
+    duration: 30,
+    description: 'Initial program planning and expectations'
+  };
+  const introMeetingFallNew   = { ...introMeetingOld, leadTime: -600 }; // 20 mån — FP28+
+  const introMeetingSpringNew = { ...introMeetingOld, leadTime: -600 }; // 20 mån — SP29+
+
+  // The non-Intro Spring/Fall meetings (Check-ins, Onboarding, Program Start,
+  // Mid-term, Evaluation) are NOT affected by the versioning.
+  const commonSpringFallMeetings = [
       {
         name: 'Check-in meeting with organizers',
         leadTime: -180, // 6 months before
@@ -251,6 +260,11 @@ const MeetingAgent = () => {
         description: 'Program evaluation and feedback'
       }
     ];
+
+  // Legacy alias: full Spring/Fall meetings array using OLD Intro offset.
+  // Retained for backward-compat in any place still reading `springFallMeetings`
+  // directly; new code should use getMeetingTypes(program).
+  const springFallMeetings = [introMeetingOld, ...commonSpringFallMeetings];
 
   const meetingTypes = {
     'Spring Program': springFallMeetings,
@@ -622,8 +636,23 @@ const MeetingAgent = () => {
       return defaultTime;
     };
 
+    // Year-gated meeting type resolution.
+    // From FP28+/SP29+ Introduction Meeting uses the new -600d offset; older programs keep -540d.
+    const getMeetingTypes = (program) => {
+      const yr = program.startDate instanceof Date
+        ? program.startDate.getFullYear()
+        : new Date(program.startDate).getFullYear();
+      if (program.type === 'Fall Program') {
+        return [yr >= 2028 ? introMeetingFallNew : introMeetingOld, ...commonSpringFallMeetings];
+      }
+      if (program.type === 'Spring Program') {
+        return [yr >= 2029 ? introMeetingSpringNew : introMeetingOld, ...commonSpringFallMeetings];
+      }
+      return meetingTypes[program.type] || [];
+    };
+
     programList.forEach(program => {
-      const programMeetings = meetingTypes[program.type] || [];
+      const programMeetings = getMeetingTypes(program);
 
       programMeetings.forEach(meetingType => {
         // For Summer Conference and Kleindagarna Introduction and Check-in meetings, only create once

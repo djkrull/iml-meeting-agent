@@ -82,9 +82,14 @@ function parseCSV(text) {
   });
 }
 
-// Meeting type definitions (mirror of frontend)
-const springFallMeetings = [
-  { name: 'Introduction Meeting', leadTime: -540, weekday: 5, time: '10:00', participants: ['Program Organizers', 'Directors', 'Admin Coordinator'], duration: 30, description: 'Initial program planning and expectations' },
+// Meeting type definitions (mirror of frontend MeetingAgent.jsx).
+// Introduction Meeting is versioned by program-year: FP28+ and SP29+ get the
+// new -600d offset (Mar→Jan shift); older programs keep -540d.
+const introMeetingOld       = { name: 'Introduction Meeting', leadTime: -540, weekday: 5, time: '10:00', participants: ['Program Organizers', 'Directors', 'Admin Coordinator'], duration: 30, description: 'Initial program planning and expectations' };
+const introMeetingFallNew   = { ...introMeetingOld, leadTime: -600 }; // FP28+
+const introMeetingSpringNew = { ...introMeetingOld, leadTime: -600 }; // SP29+
+
+const commonSpringFallMeetings = [
   { name: 'Check-in meeting with organizers', leadTime: -180, weekday: 5, time: '14:00', participants: ['Program Organizers', 'Admin Team', 'Directors'], duration: 30, description: 'Review preparations and logistics' },
   { name: 'Check-in meeting junior fellows', leadTime: -180, weekday: 5, time: '14:30', participants: ['Junior Fellows', 'Admin Team', 'Directors'], duration: 30, description: 'Junior fellow orientation and support' },
   { name: 'Onboarding meeting', leadTime: -6, weekday: 5, time: '14:00', participants: ['Admin Team', 'Organizers', 'Directors'], duration: 30, description: 'Practical information and house rules' },
@@ -92,6 +97,20 @@ const springFallMeetings = [
   { name: 'Mid-term meeting', leadTime: 45, weekday: 5, time: '14:00', participants: ['Program Organizers', 'Admin Team', 'Directors'], duration: 30, description: 'Progress check and adjustments' },
   { name: 'Evaluation meeting/lunch', leadTime: 'end', time: '12:00', participants: ['Program Organizers', 'Directors'], duration: 90, description: 'Program evaluation and feedback' }
 ];
+
+// Legacy alias kept for any external references; uses OLD Intro offset.
+const springFallMeetings = [introMeetingOld, ...commonSpringFallMeetings];
+
+function getSpringFallMeetingsFor(program) {
+  const yr = program.year;
+  if (program.type === 'Fall Program') {
+    return [yr >= 2028 ? introMeetingFallNew : introMeetingOld, ...commonSpringFallMeetings];
+  }
+  if (program.type === 'Spring Program') {
+    return [yr >= 2029 ? introMeetingSpringNew : introMeetingOld, ...commonSpringFallMeetings];
+  }
+  return springFallMeetings;
+}
 
 const summerConferenceMeetings = [
   { name: 'Introduction Meeting - Group 1', leadTime: -240, weekday: 5, time: '11:00', participants: ['Conference Organizer Group 1', 'Admin Team', 'Directors'], duration: 30, description: 'Initial planning for first conference group' },
@@ -207,7 +226,7 @@ async function main() {
 
     programs.forEach(program => {
       const defs = program.type === 'Summer Conference' ? summerConferenceMeetings
-                 : (program.type === 'Spring Program' || program.type === 'Fall Program') ? springFallMeetings
+                 : (program.type === 'Spring Program' || program.type === 'Fall Program') ? getSpringFallMeetingsFor(program)
                  : [];
 
       defs.forEach(mt => {
