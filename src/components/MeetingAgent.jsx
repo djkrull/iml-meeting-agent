@@ -332,7 +332,7 @@ const MeetingAgent = () => {
         time: '09:30',
         participants: ['Organizers', 'Admin Team'],
         duration: 30,
-        description: 'Weekly orientation for new participants'
+        description: 'Orientation for new organizers, zoom, lunches, photo etc...'
       },
       {
         name: 'Weekly Welcome Meeting',
@@ -1738,10 +1738,15 @@ const MeetingAgent = () => {
   };
 
   // Filter meetings based on selected filters (type + specific program), sorted by date then time
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const filteredMeetings = meetings
     .filter(m => {
       if (!filters[m.programType]) return false;
       if (programFilter !== 'all' && m.programName !== programFilter) return false;
+      const meetingDate = m.date instanceof Date ? m.date : new Date(m.date);
+      if (meetingDate < todayStart) return false;
       return true;
     })
     .sort((a, b) => {
@@ -2008,7 +2013,7 @@ const MeetingAgent = () => {
               <div className="flex items-center">
                 <Upload className="w-6 h-6 text-indigo-600 mr-3" />
                 <span className="text-indigo-700 font-semibold">
-                  {selectedFile || 'Upload Program Schedule (Excel)'}
+                  {selectedFile || 'Upload Verksamhetsplanering 20XX-20XX'}
                 </span>
               </div>
               <p className="text-sm text-indigo-600 mb-2">
