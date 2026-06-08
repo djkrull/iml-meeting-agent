@@ -165,7 +165,7 @@ async function captureLive() {
     console.log('Director: 01-name-selection.png');
 
     await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Tobias'));
+      const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Hans'));
       if (btn) btn.click();
     });
     await new Promise(r => setTimeout(r, 5000));

@@ -195,9 +195,9 @@ async function recapture() {
     await page.screenshot({ path: path.join(DIRECTOR_DIR, '01-name-selection.png') });
     console.log('Director: 01-name-selection.png');
 
-    // Select Tobias
+    // Select Hans (Director)
     await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Tobias'));
+      const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Hans'));
       if (btn) btn.click();
     });
     await new Promise(r => setTimeout(r, 4000));

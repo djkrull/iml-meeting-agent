@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
@@ -20,6 +20,21 @@ const MeetingAgent = () => {
     'Summer Conference': true
   });
   const [programFilter, setProgramFilter] = useState('all'); // 'all' or specific programName
+  const [yearFilter, setYearFilter] = useState('all'); // 'all' or specific year (e.g. '2027')
+  const [programDropdownOpen, setProgramDropdownOpen] = useState(false);
+  const programDropdownRef = useRef(null);
+
+  // Close program-dropdown on outside click
+  useEffect(() => {
+    if (!programDropdownOpen) return;
+    const handler = (e) => {
+      if (programDropdownRef.current && !programDropdownRef.current.contains(e.target)) {
+        setProgramDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [programDropdownOpen]);
   const [editingMeeting, setEditingMeeting] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [reviewUrl, setReviewUrl] = useState(null);
@@ -1745,6 +1760,7 @@ const MeetingAgent = () => {
     .filter(m => {
       if (!filters[m.programType]) return false;
       if (programFilter !== 'all' && m.programName !== programFilter) return false;
+      if (yearFilter !== 'all' && String(m.programYear) !== yearFilter) return false;
       const meetingDate = m.date instanceof Date ? m.date : new Date(m.date);
       if (meetingDate < todayStart) return false;
       return true;
@@ -1761,6 +1777,27 @@ const MeetingAgent = () => {
   const programNamesForFilter = Array.from(
     new Set(meetings.map(m => m.programName).filter(Boolean))
   ).sort();
+
+  // Map programName → {type, year} for badge rendering in the dropdown
+  const programInfoMap = new Map();
+  for (const m of meetings) {
+    if (m.programName && !programInfoMap.has(m.programName)) {
+      programInfoMap.set(m.programName, { type: m.programType, year: m.programYear });
+    }
+  }
+
+  // Build sorted list of unique years (only those with future meetings) for the year dropdown
+  const yearsForFilter = Array.from(
+    new Set(
+      meetings
+        .filter(m => {
+          const d = m.date instanceof Date ? m.date : new Date(m.date);
+          return d >= todayStart;
+        })
+        .map(m => m.programYear)
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a - b);
 
   // Statistics
   const stats = {
@@ -2211,18 +2248,82 @@ const MeetingAgent = () => {
                 ))}
               </div>
 
-              <h2 className="text-xl font-bold text-gray-800 mb-2">Filter by Program</h2>
-              <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold text-gray-800 mb-2">Filter by Year</h2>
+              <div className="flex items-center gap-3 mb-4">
                 <select
-                  value={programFilter}
-                  onChange={(e) => setProgramFilter(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[300px]"
+                  value={yearFilter}
+                  onChange={(e) => setYearFilter(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[150px]"
                 >
-                  <option value="all">All Programs</option>
-                  {programNamesForFilter.map(name => (
-                    <option key={name} value={name}>{name}</option>
+                  <option value="all">All Years</option>
+                  {yearsForFilter.map(y => (
+                    <option key={y} value={String(y)}>{y}</option>
                   ))}
                 </select>
+                {yearFilter !== 'all' && (
+                  <button
+                    onClick={() => setYearFilter('all')}
+                    className="text-sm text-indigo-600 hover:text-indigo-800 underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <h2 className="text-xl font-bold text-gray-800 mb-2">Filter by Program</h2>
+              <div className="flex items-center gap-3">
+                <div className="relative" ref={programDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setProgramDropdownOpen(o => !o)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[380px] flex items-center justify-between gap-2"
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      {programFilter === 'all' ? (
+                        <span className="text-gray-700">All Programs</span>
+                      ) : (
+                        <>
+                          <span className="truncate">{programFilter}</span>
+                          {programInfoMap.get(programFilter) && (
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${getTypeBadgeColor(programInfoMap.get(programFilter).type)}`}>
+                              {programInfoMap.get(programFilter).type} {programInfoMap.get(programFilter).year}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${programDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {programDropdownOpen && (
+                    <div className="absolute z-20 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-96 overflow-auto">
+                      <button
+                        type="button"
+                        onClick={() => { setProgramFilter('all'); setProgramDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 ${programFilter === 'all' ? 'bg-indigo-50 font-semibold' : ''}`}
+                      >
+                        All Programs
+                      </button>
+                      {programNamesForFilter.map(name => {
+                        const info = programInfoMap.get(name);
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => { setProgramFilter(name); setProgramDropdownOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center justify-between gap-2 ${programFilter === name ? 'bg-indigo-50 font-semibold' : ''}`}
+                          >
+                            <span className="truncate">{name}</span>
+                            {info && (
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${getTypeBadgeColor(info.type)}`}>
+                                {info.type} {info.year}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 {programFilter !== 'all' && (
                   <button
                     onClick={() => setProgramFilter('all')}

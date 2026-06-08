@@ -101,7 +101,7 @@ async function captureDirectorScreenshots() {
     let clicked = false;
     for (const btn of directorButtons) {
       const text = await btn.evaluate(el => el.innerText);
-      if (text.includes('Tobias') || text.includes('Ekholm')) {
+      if (text.includes('Hans') || text.includes('Ringström')) {
         await btn.click();
         clicked = true;
         break;

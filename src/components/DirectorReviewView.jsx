@@ -297,22 +297,22 @@ const DirectorReviewView = ({ reviewId }) => {
           <div className="space-y-3">
             <button
               onClick={() => {
-                setDirectorName('Tobias Ekholm, Director');
-                setShowNamePrompt(false);
-              }}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
-            >
-              <span>Tobias Ekholm</span>
-              <span className="text-sm text-indigo-200">Director</span>
-            </button>
-            <button
-              onClick={() => {
-                setDirectorName('Hans Ringström, Deputy Director');
+                setDirectorName('Hans Ringström, Director');
                 setShowNamePrompt(false);
               }}
               className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
             >
               <span>Hans Ringström</span>
+              <span className="text-sm text-indigo-200">Director</span>
+            </button>
+            <button
+              onClick={() => {
+                setDirectorName('Georgios Dimitroglou Rizell, Deputy Director');
+                setShowNamePrompt(false);
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
+            >
+              <span>Georgios Dimitroglou Rizell</span>
               <span className="text-sm text-indigo-200">Deputy Director</span>
             </button>
           </div>
