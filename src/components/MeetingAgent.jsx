@@ -1658,13 +1658,34 @@ const MeetingAgent = () => {
     }
   };
 
-  // Export to ICS (iCalendar) format for Outlook
+  // Export to ICS (iCalendar) format for Outlook.
+  // Exports all UPCOMING meetings; non-approved ones are tagged STATUS:TENTATIVE
+  // and get a [PRELIMINÄR] prefix so they appear as preliminary in Outlook.
   const exportToICS = () => {
-    const approvedMeetings = meetings.filter(m => m.approved || m.status === 'scheduled');
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const upcoming = meetings.filter(m => {
+      const d = m.date instanceof Date ? m.date : new Date(m.date);
+      return d >= todayStart;
+    });
 
-    if (approvedMeetings.length === 0) {
-      alert('No approved meetings to export');
+    if (upcoming.length === 0) {
+      alert('Inga framtida möten att exportera.');
       return;
+    }
+
+    const isApproved = m => m.approved || m.status === 'scheduled';
+    const approvedCount = upcoming.filter(isApproved).length;
+    const tentativeCount = upcoming.length - approvedCount;
+
+    if (tentativeCount > 0) {
+      const ok = window.confirm(
+        `Exportera ${upcoming.length} framtida möten?\n\n` +
+        `  ✅ ${approvedCount} godkända (STATUS: CONFIRMED)\n` +
+        `  ⚠ ${tentativeCount} ej godkända (STATUS: TENTATIVE + [PRELIMINÄR]-prefix)\n\n` +
+        `Den exporterade filen är en preliminär kalender — ej godkända möten visas som tentativa i Outlook.`
+      );
+      if (!ok) return;
     }
 
     // Helper function to format date/time for ICS
@@ -1702,31 +1723,39 @@ const MeetingAgent = () => {
     };
 
     // Build ICS file content
+    const calNameSuffix = tentativeCount > 0 ? ' (preliminär)' : '';
     let icsContent = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//IML Meeting Agent//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
-      'X-WR-CALNAME:IML Meetings',
+      `X-WR-CALNAME:IML Meetings${calNameSuffix}`,
       'X-WR-TIMEZONE:Europe/Stockholm'
     ];
+    if (tentativeCount > 0) {
+      icsContent.push(`X-WR-CALDESC:Preliminär kalender — ${tentativeCount} av ${upcoming.length} möten är ännu ej godkända av direktörerna.`);
+    }
 
-    approvedMeetings.forEach((meeting, index) => {
+    upcoming.forEach((meeting, index) => {
       const startDateTime = formatICSDateTime(meeting.date, meeting.time);
       const endDateTime = calculateEndTime(startDateTime, meeting.duration);
       const timestamp = formatICSDateTime(new Date(), '12:00');
+      const approved = isApproved(meeting);
+      const summaryPrefix = approved ? '' : '[PRELIMINÄR] ';
+      const status = approved ? 'CONFIRMED' : 'TENTATIVE';
+      const descNote = approved ? '' : 'OBS: Detta möte är ännu ej godkänt av direktörerna.\\n\\n';
 
       icsContent.push('BEGIN:VEVENT');
       icsContent.push(`UID:iml-meeting-${meeting.id}-${Date.now()}@institutmittagleffler.se`);
       icsContent.push(`DTSTAMP:${timestamp}`);
       icsContent.push(`DTSTART:${startDateTime}`);
       icsContent.push(`DTEND:${endDateTime}`);
-      icsContent.push(`SUMMARY:${meeting.type} - ${meeting.programName}`);
-      icsContent.push(`DESCRIPTION:${meeting.description}\\n\\nParticipants: ${meeting.participants.join(', ')}`);
+      icsContent.push(`SUMMARY:${summaryPrefix}${meeting.type} - ${meeting.programName}`);
+      icsContent.push(`DESCRIPTION:${descNote}${meeting.description}\\n\\nParticipants: ${meeting.participants.join(', ')}`);
       icsContent.push(`LOCATION:Institut Mittag-Leffler`);
       icsContent.push(`CATEGORIES:${meeting.programType}`);
-      icsContent.push(`STATUS:CONFIRMED`);
+      icsContent.push(`STATUS:${status}`);
       icsContent.push('END:VEVENT');
     });
 
@@ -2058,7 +2087,7 @@ const MeetingAgent = () => {
               </p>
               <div className="w-full">
                 <label htmlFor="file-upload" className="cursor-pointer">
-                  <div className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold text-center transition">
+                  <div className="bg-indigo-100 text-indigo-800 hover:bg-indigo-200 px-6 py-3 rounded-lg font-semibold text-center transition">
                     Click to Browse Files
                   </div>
                 </label>
@@ -2151,7 +2180,7 @@ const MeetingAgent = () => {
                       </h2>
                       <button
                         onClick={autoResolveConflicts}
-                        className="bg-red-700 hover:bg-red-800 text-white px-6 py-2 rounded-lg font-semibold flex items-center gap-2 transition"
+                        className="bg-red-100 text-red-800 hover:bg-red-200 px-6 py-2 rounded-lg font-semibold flex items-center gap-2 transition"
                       >
                         <RefreshCw className="w-5 h-5" />
                         Auto-Resolve All Conflicts
@@ -2339,7 +2368,7 @@ const MeetingAgent = () => {
             <div className="mb-8 flex justify-end gap-4 flex-wrap">
               <button
                 onClick={reloadFromDatabase}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-indigo-100 text-indigo-800 hover:bg-indigo-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                 title="Reload all meetings from the database"
               >
                 <RefreshCw className="w-5 h-5" />
@@ -2347,7 +2376,7 @@ const MeetingAgent = () => {
               </button>
               <button
                 onClick={cleanupCorruptedMeetings}
-                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-red-100 text-red-800 hover:bg-red-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                 title="Remove meetings with placeholder names like 'Title', 'TBD', etc."
               >
                 <X className="w-5 h-5" />
@@ -2355,7 +2384,7 @@ const MeetingAgent = () => {
               </button>
               <button
                 onClick={removeMyDuplicates}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-purple-100 text-purple-800 hover:bg-purple-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                 title="Remove duplicate meetings from your admin view"
               >
                 <Trash2 className="w-5 h-5" />
@@ -2363,7 +2392,7 @@ const MeetingAgent = () => {
               </button>
               <button
                 onClick={shareForReview}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-orange-100 text-orange-800 hover:bg-orange-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <Share2 className="w-5 h-5" />
                 Share for Director Review
@@ -2372,7 +2401,7 @@ const MeetingAgent = () => {
                 <>
                   <button
                     onClick={syncAllMeetingsToReview}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    className="bg-blue-100 text-blue-800 hover:bg-blue-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                     title="Push all current meeting times/dates to director view"
                   >
                     <RefreshCw className="w-5 h-5" />
@@ -2380,7 +2409,7 @@ const MeetingAgent = () => {
                   </button>
                   <button
                     onClick={refreshApprovals}
-                    className="bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    className="bg-teal-100 text-teal-800 hover:bg-teal-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                     title="Check latest director availability responses"
                   >
                     <RefreshCw className="w-5 h-5" />
@@ -2388,7 +2417,7 @@ const MeetingAgent = () => {
                   </button>
                   <button
                     onClick={removeDuplicatesFromDirectorView}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                     title="Remove duplicate meetings from director view"
                   >
                     <Trash2 className="w-5 h-5" />
@@ -2396,7 +2425,7 @@ const MeetingAgent = () => {
                   </button>
                   <button
                     onClick={openClearModal}
-                    className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    className="bg-red-100 text-red-800 hover:bg-red-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
                     title="Clear reviews from specific directors"
                   >
                     <Trash2 className="w-5 h-5" />
@@ -2406,21 +2435,21 @@ const MeetingAgent = () => {
               )}
               <button
                 onClick={approveAll}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-gray-100 text-gray-800 hover:bg-gray-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <CheckCircle className="w-5 h-5" />
                 Approve All
               </button>
               <button
                 onClick={exportToICS}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-purple-100 text-purple-800 hover:bg-purple-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <CalendarDays className="w-5 h-5" />
                 Export to Outlook (.ics)
               </button>
               <button
                 onClick={exportToExcel}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                className="bg-green-100 text-green-800 hover:bg-green-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <Download className="w-5 h-5" />
                 Export to Excel
@@ -2439,7 +2468,7 @@ const MeetingAgent = () => {
                     <code className="text-sm text-gray-800 break-all flex-1">{reviewUrl}</code>
                     <button
                       onClick={copyReviewUrl}
-                      className="ml-4 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition flex-shrink-0"
+                      className="ml-4 bg-indigo-100 text-indigo-800 hover:bg-indigo-200 px-4 py-2 rounded-lg flex items-center gap-2 transition flex-shrink-0"
                     >
                       <Copy className="w-4 h-4" />
                       Copy
@@ -2458,7 +2487,7 @@ const MeetingAgent = () => {
                   </div>
                   <button
                     onClick={() => setShowShareModal(false)}
-                    className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition"
+                    className="w-full bg-gray-100 text-gray-800 hover:bg-gray-200 px-6 py-3 rounded-lg font-semibold transition"
                   >
                     Close
                   </button>
@@ -2486,7 +2515,7 @@ const MeetingAgent = () => {
                           <span className="text-gray-800 font-medium">{director}</span>
                           <button
                             onClick={() => clearDirectorReviews(director)}
-                            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition"
+                            className="bg-red-100 text-red-800 hover:bg-red-200 px-4 py-2 rounded-lg flex items-center gap-2 transition"
                           >
                             <Trash2 className="w-4 h-4" />
                             Clear Reviews
@@ -2498,7 +2527,7 @@ const MeetingAgent = () => {
 
                   <button
                     onClick={() => setShowClearModal(false)}
-                    className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition"
+                    className="w-full bg-gray-100 text-gray-800 hover:bg-gray-200 px-6 py-3 rounded-lg font-semibold transition"
                   >
                     Close
                   </button>
@@ -2618,7 +2647,7 @@ const MeetingAgent = () => {
                           <div className="mb-3">
                             <button
                               onClick={() => setEditingMeeting(null)}
-                              className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 transition"
+                              className="text-sm bg-indigo-100 text-indigo-800 px-3 py-1 rounded hover:bg-indigo-200 transition"
                             >
                               Done Editing
                             </button>
@@ -2637,14 +2666,14 @@ const MeetingAgent = () => {
                               />
                               <button
                                 onClick={() => saveDescription(meeting.id)}
-                                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                                className="px-3 py-2 bg-green-100 text-green-800 rounded-lg hover:bg-green-200 transition"
                                 title="Save"
                               >
                                 <Save className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={cancelEditing}
-                                className="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition"
+                                className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition"
                                 title="Cancel"
                               >
                                 <X className="w-4 h-4" />
@@ -2706,7 +2735,7 @@ const MeetingAgent = () => {
                             </div>
                             <button
                               onClick={() => toggleAlreadyScheduled(meeting.id)}
-                              className="px-4 py-2 rounded-lg font-medium bg-orange-500 text-white hover:bg-orange-600 transition text-sm"
+                              className="px-4 py-2 rounded-lg font-medium bg-orange-100 text-orange-800 hover:bg-orange-200 transition text-sm"
                             >
                               Undo
                             </button>
@@ -2717,8 +2746,8 @@ const MeetingAgent = () => {
                               onClick={() => toggleApproval(meeting.id)}
                               className={`px-4 py-2 rounded-lg font-medium transition ${
                                 meeting.approved
-                                  ? 'bg-green-600 text-white hover:bg-green-700'
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                  ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                               }`}
                             >
                               {meeting.approved ? 'Approved' : 'Approve'}
@@ -2727,7 +2756,7 @@ const MeetingAgent = () => {
                             {meeting.approved && meeting.status !== 'scheduled' && (
                               <button
                                 onClick={() => markScheduled(meeting.id)}
-                                className="px-4 py-2 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
+                                className="px-4 py-2 rounded-lg font-medium bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition"
                               >
                                 Mark Scheduled
                               </button>
@@ -2735,7 +2764,7 @@ const MeetingAgent = () => {
 
                             <button
                               onClick={() => toggleAlreadyScheduled(meeting.id)}
-                              className="px-4 py-2 rounded-lg font-medium bg-gray-500 text-white hover:bg-gray-600 transition text-sm"
+                              className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 transition text-sm"
                             >
                               Already Scheduled
                             </button>
@@ -2743,7 +2772,7 @@ const MeetingAgent = () => {
                             {meeting.approvals && meeting.approvals.length > 0 && currentReviewId && (
                               <button
                                 onClick={() => syncSingleMeeting(meeting, true)}
-                                className="px-4 py-2 rounded-lg font-medium bg-yellow-600 text-white hover:bg-yellow-700 transition text-sm flex items-center gap-2"
+                                className="px-4 py-2 rounded-lg font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 transition text-sm flex items-center gap-2"
                                 title="Clear approvals for this meeting and sync new time to directors"
                               >
                                 <RefreshCw className="w-4 h-4" />
