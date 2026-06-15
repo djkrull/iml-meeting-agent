@@ -395,6 +395,10 @@ const DirectorReviewView = ({ reviewId }) => {
             }
             // Filter out already scheduled meetings
             if (meeting.status === 'already-scheduled') return false;
+            // Filter out past meetings (before today's start-of-day, local time)
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            if (new Date(meeting.date) < todayStart) return false;
             return true;
           }).sort((a, b) => {
             // Sort by date first, then by time
@@ -536,10 +540,10 @@ const DirectorReviewView = ({ reviewId }) => {
                       <div className="text-center">
                         <div className={`px-4 py-2 rounded-lg font-medium ${
                           myApproval.status === 'accepted' || myApproval.status === 'approved'
-                            ? 'bg-green-600 text-white'
+                            ? 'bg-green-100 text-green-800'
                             : myApproval.status === 'declined' || myApproval.status === 'rejected'
-                            ? 'bg-red-600 text-white'
-                            : 'bg-gray-400 text-white'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-gray-100 text-gray-800'
                         }`}>
                           {(myApproval.status === 'accepted' || myApproval.status === 'approved') ? 'Attending' :
                            (myApproval.status === 'declined' || myApproval.status === 'rejected') ? 'Not available' : 'Pending'}
@@ -555,14 +559,14 @@ const DirectorReviewView = ({ reviewId }) => {
                       <>
                         <button
                           onClick={() => submitApproval(meeting.id, 'accepted')}
-                          className="px-4 py-2 rounded-lg font-medium bg-green-600 text-white hover:bg-green-700 transition flex items-center gap-2"
+                          className="px-4 py-2 rounded-lg font-medium bg-green-100 text-green-800 hover:bg-green-200 transition flex items-center gap-2"
                         >
                           <CheckCircle className="w-4 h-4" />
                           I will attend
                         </button>
                         <button
                           onClick={() => submitApproval(meeting.id, 'declined')}
-                          className="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition flex items-center gap-2"
+                          className="px-4 py-2 rounded-lg font-medium bg-red-100 text-red-800 hover:bg-red-200 transition flex items-center gap-2"
                         >
                           <XCircle className="w-4 h-4" />
                           I will not attend
@@ -585,7 +589,7 @@ const DirectorReviewView = ({ reviewId }) => {
                           <>
                             <button
                               onClick={() => clearMyResponse(meeting.id)}
-                              className="px-4 py-2 rounded-lg font-medium bg-orange-500 text-white hover:bg-orange-600 transition flex items-center gap-2 text-sm"
+                              className="px-4 py-2 rounded-lg font-medium bg-orange-100 text-orange-800 hover:bg-orange-200 transition flex items-center gap-2 text-sm"
                             >
                               <X className="w-4 h-4" />
                               Clear My Response
