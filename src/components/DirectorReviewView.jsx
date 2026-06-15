@@ -270,19 +270,21 @@ const DirectorReviewView = ({ reviewId }) => {
   const getProgramTypeColor = (programType) => {
     const type = programType?.toLowerCase() || '';
     if (type.includes('fall') || type.includes('höst')) {
-      return 'bg-orange-500 text-white';
+      return 'bg-orange-100 text-orange-800';
     } else if (type.includes('spring') || type.includes('vår')) {
-      return 'bg-green-500 text-white';
+      return 'bg-green-100 text-green-800';
     } else if (type.includes('summer') || type.includes('sommar')) {
-      return 'bg-yellow-500 text-white';
+      return 'bg-yellow-100 text-yellow-800';
+    } else if (type.includes('kleindagarna')) {
+      return 'bg-blue-100 text-blue-800';
     } else if (type.includes('winter') || type.includes('vinter')) {
-      return 'bg-blue-500 text-white';
+      return 'bg-blue-100 text-blue-800';
     } else if (type.includes('workshop')) {
-      return 'bg-purple-500 text-white';
+      return 'bg-purple-100 text-purple-800';
     } else if (type.includes('conference') || type.includes('konferens')) {
-      return 'bg-indigo-500 text-white';
+      return 'bg-indigo-100 text-indigo-800';
     } else {
-      return 'bg-gray-500 text-white';
+      return 'bg-gray-100 text-gray-800';
     }
   };
 
