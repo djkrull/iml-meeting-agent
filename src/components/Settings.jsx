@@ -62,9 +62,15 @@ const Settings = ({ onClose }) => {
       const res = await fetch(`${API_URL}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config })
+        body: JSON.stringify({ config, pin }) // PIN re-verified server-side
       });
+      if (res.status === 401) { setSavedMsg('Fel PIN — kunde inte spara.'); return; }
+      if (res.status === 429) { setSavedMsg('För många försök — vänta en stund.'); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // If the PIN was changed, keep using the new value for subsequent saves.
+      if (config.settingsPin && String(config.settingsPin).trim() !== '') {
+        setPin(String(config.settingsPin).trim());
+      }
       setSavedMsg('Sparat ✓');
       setTimeout(() => setSavedMsg(''), 3000);
     } catch (err) {
@@ -205,12 +211,13 @@ const Settings = ({ onClose }) => {
         {config && (
           <div className="p-6 border-t border-gray-200 flex items-center gap-3">
             <Lock className="w-4 h-4 text-gray-500" />
-            <label className="text-sm text-gray-700">Settings-PIN:</label>
+            <label className="text-sm text-gray-700">Ny PIN:</label>
             <input
               type="text"
               value={config.settingsPin || ''}
+              placeholder={config.hasPin ? '•••• (lämna tomt = behåll)' : 'ingen PIN satt'}
               onChange={(e) => setConfig(prev => ({ ...prev, settingsPin: e.target.value }))}
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <span className="text-xs text-gray-400">Lågsäkerhet — internt verktyg. Glöm inte att spara.</span>
           </div>
