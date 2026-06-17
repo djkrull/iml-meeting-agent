@@ -1,6 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 const path = require('path');
+const { buildDefaultConfig } = require('./defaultSettings');
 
 // Determine which database to use
 const USE_POSTGRES = !!process.env.DATABASE_URL;
@@ -66,6 +67,24 @@ async function ensureUniqueConstraint(poolInstance, table, name, columnsSql) {
   } catch (err) {
     console.error(`Failed to ensure constraint ${name}:`, err.message);
     throw err;
+  }
+}
+
+// Seed the single app_settings row with defaults if it doesn't exist yet.
+// Idempotent: only inserts when row id=1 is missing, so existing config is never
+// overwritten on restart/redeploy.
+async function ensureAppSettingsPostgres() {
+  try {
+    const existing = await pool.query('SELECT 1 FROM app_settings WHERE id = 1');
+    if (existing.rowCount === 0) {
+      await pool.query(
+        'INSERT INTO app_settings (id, config, updated_at) VALUES (1, $1::jsonb, now())',
+        [JSON.stringify(buildDefaultConfig())]
+      );
+      console.log('Seeded app_settings with default configuration');
+    }
+  } catch (err) {
+    console.error('Failed to ensure app_settings:', err.message);
   }
 }
 
@@ -191,6 +210,16 @@ async function initializePostgresDatabase() {
     await ensureUniqueConstraint(pool, 'programs', 'programs_unique_idx',
       '(name, type, year)');
 
+    // Single-row app configuration (directors, admins, meeting rules, etc.)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id INTEGER PRIMARY KEY,
+        config JSONB NOT NULL,
+        updated_at TIMESTAMP NOT NULL
+      )
+    `);
+    await ensureAppSettingsPostgres();
+
     console.log('PostgreSQL tables initialized');
   } catch (error) {
     console.error('Error initializing PostgreSQL:', error);
@@ -284,12 +313,85 @@ function initializeSQLiteDatabase() {
       )
     `);
 
+    // Single-row app configuration (directors, admins, meeting rules, etc.)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id INTEGER PRIMARY KEY,
+        config TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `, () => {
+      // Seed defaults only if the row is missing (idempotent).
+      db.get('SELECT 1 FROM app_settings WHERE id = 1', (err, row) => {
+        if (!err && !row) {
+          db.run(
+            'INSERT INTO app_settings (id, config, updated_at) VALUES (1, ?, ?)',
+            [JSON.stringify(buildDefaultConfig()), new Date().toISOString()],
+            (insErr) => {
+              if (insErr) console.error('Failed to seed app_settings (SQLite):', insErr.message);
+              else console.log('Seeded app_settings with default configuration (SQLite)');
+            }
+          );
+        }
+      });
+    });
+
     console.log('SQLite tables initialized');
   });
 }
 
 // Helper functions
 const dbHelpers = {
+  // Get the single app_settings config (seeds defaults if missing).
+  getSettings: () => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        if (USE_POSTGRES) {
+          await ensureAppSettingsPostgres();
+          const result = await pool.query('SELECT config FROM app_settings WHERE id = 1');
+          if (result.rows.length === 0) return resolve(buildDefaultConfig());
+          const cfg = result.rows[0].config;
+          resolve(typeof cfg === 'string' ? JSON.parse(cfg) : cfg);
+        } else {
+          db.get('SELECT config FROM app_settings WHERE id = 1', (err, row) => {
+            if (err) return reject(err);
+            if (!row) return resolve(buildDefaultConfig());
+            try { resolve(JSON.parse(row.config)); }
+            catch (e) { reject(e); }
+          });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Overwrite the single app_settings config (explicit save — never via auto-save).
+  saveSettings: (config) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const json = JSON.stringify(config);
+        if (USE_POSTGRES) {
+          await pool.query(
+            `INSERT INTO app_settings (id, config, updated_at) VALUES (1, $1::jsonb, now())
+             ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config, updated_at = EXCLUDED.updated_at`,
+            [json]
+          );
+          resolve({ success: true });
+        } else {
+          db.run(
+            `INSERT INTO app_settings (id, config, updated_at) VALUES (1, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at`,
+            [json, new Date().toISOString()],
+            (err) => err ? reject(err) : resolve({ success: true })
+          );
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
   // Create new review
   createReview: (reviewId, createdBy) => {
     return new Promise(async (resolve, reject) => {

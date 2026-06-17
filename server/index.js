@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const reviewRoutes = require('./routes/reviews');
 const programRoutes = require('./routes/programs');
+const settingsRoutes = require('./routes/settings');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -15,6 +16,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Routes
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/programs', programRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
