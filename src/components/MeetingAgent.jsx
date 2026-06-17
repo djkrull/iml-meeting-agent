@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
+
+const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
@@ -23,6 +26,43 @@ const MeetingAgent = () => {
   const [yearFilter, setYearFilter] = useState('all'); // 'all' or specific year (e.g. '2027')
   const [programDropdownOpen, setProgramDropdownOpen] = useState(false);
   const programDropdownRef = useRef(null);
+
+  // Admin identity (who is using the dashboard) — names come from app_settings.
+  const [adminList, setAdminList] = useState([]);
+  const [adminIdentity, setAdminIdentity] = useState(null);
+  const [identityConfigState, setIdentityConfigState] = useState('loading'); // 'loading' | 'ready' | 'error'
+
+  // Load the admin roster from settings, then resolve any remembered identity.
+  const loadAdminRoster = React.useCallback(async () => {
+    setIdentityConfigState('loading');
+    try {
+      const res = await fetch(`${API_URL}/api/settings`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const admins = (data.config?.admins || []).filter(a => a.active !== false);
+      setAdminList(admins);
+      const storedId = readStoredIdentityId(ADMIN_IDENTITY_KEY);
+      const remembered = storedId ? admins.find(a => a.id === storedId) : null;
+      if (remembered) setAdminIdentity(remembered);
+      setIdentityConfigState('ready');
+    } catch (err) {
+      console.error('Failed to load admin roster:', err);
+      setIdentityConfigState('error');
+    }
+  }, []);
+
+  useEffect(() => { loadAdminRoster(); }, [loadAdminRoster]);
+
+  const pickAdminIdentity = (person, remember) => {
+    if (remember) storeIdentityId(ADMIN_IDENTITY_KEY, person.id);
+    else clearStoredIdentity(ADMIN_IDENTITY_KEY);
+    setAdminIdentity(person);
+  };
+
+  const switchAdminIdentity = () => {
+    clearStoredIdentity(ADMIN_IDENTITY_KEY);
+    setAdminIdentity(null);
+  };
 
   // Close program-dropdown on outside click
   useEffect(() => {
@@ -2177,6 +2217,23 @@ const MeetingAgent = () => {
     alert(`✅ Resolved conflicts!\n\n${movedCount} meetings moved to available time slots.\n\nRules applied:\n  • Directors meetings placed on Fridays\n  • Other meetings kept on same day when possible`);
   };
 
+  // Block the dashboard until an admin has identified themselves.
+  if (!adminIdentity) {
+    return (
+      <IdentityPicker
+        title="IML Meeting Booking Agent"
+        subtitle="Välj ditt namn för att fortsätta:"
+        people={adminList}
+        onPick={pickAdminIdentity}
+        loading={identityConfigState === 'loading'}
+        error={identityConfigState === 'error'
+          ? 'Kunde inte ladda administratörsnamnen. Kontrollera att servern är igång och försök igen.'
+          : null}
+        onRetry={loadAdminRoster}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
       <div className="max-w-7xl mx-auto">
@@ -2191,7 +2248,10 @@ const MeetingAgent = () => {
                 Institut Mittag-Leffler Meeting Coordination System
               </p>
             </div>
-            <Calendar className="w-16 h-16 text-indigo-600" />
+            <div className="flex items-center gap-4">
+              <IdentityChip person={adminIdentity} onSwitch={switchAdminIdentity} />
+              <Calendar className="w-16 h-16 text-indigo-600" />
+            </div>
           </div>
 
           {/* File Upload */}

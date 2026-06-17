@@ -1,16 +1,61 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X, Download, Info } from 'lucide-react';
+import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+const DIRECTOR_IDENTITY_KEY = 'iml-director-identity';
 
 const DirectorReviewView = ({ reviewId }) => {
   const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [directorName, setDirectorName] = useState('');
+  const [directorPerson, setDirectorPerson] = useState(null); // { id, name, role }
+  const [directors, setDirectors] = useState([]);
+  const [identityConfigState, setIdentityConfigState] = useState('loading'); // 'loading' | 'ready' | 'error'
   const [showNamePrompt, setShowNamePrompt] = useState(true);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [editedDescription, setEditedDescription] = useState('');
   const [changingDecisionId, setChangingDecisionId] = useState(null);
+
+  // Load the director roster from settings, then resolve any remembered identity.
+  const loadDirectors = useCallback(async () => {
+    setIdentityConfigState('loading');
+    try {
+      const res = await fetch(`${API_URL}/api/settings`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const list = (data.config?.directors || []).filter(d => d.active !== false);
+      setDirectors(list);
+      const storedId = readStoredIdentityId(DIRECTOR_IDENTITY_KEY);
+      const remembered = storedId ? list.find(d => d.id === storedId) : null;
+      if (remembered) {
+        setDirectorPerson(remembered);
+        setDirectorName(`${remembered.name}, ${remembered.role}`);
+        setShowNamePrompt(false);
+      }
+      setIdentityConfigState('ready');
+    } catch (err) {
+      console.error('Failed to load directors:', err);
+      setIdentityConfigState('error');
+    }
+  }, []);
+
+  useEffect(() => { loadDirectors(); }, [loadDirectors]);
+
+  const pickDirector = (person, remember) => {
+    if (remember) storeIdentityId(DIRECTOR_IDENTITY_KEY, person.id);
+    else clearStoredIdentity(DIRECTOR_IDENTITY_KEY);
+    setDirectorPerson(person);
+    setDirectorName(`${person.name}, ${person.role}`);
+    setShowNamePrompt(false);
+  };
+
+  const switchDirector = () => {
+    clearStoredIdentity(DIRECTOR_IDENTITY_KEY);
+    setDirectorPerson(null);
+    setDirectorName('');
+    setShowNamePrompt(true);
+  };
 
   const fetchReview = useCallback(async () => {
     try {
@@ -290,36 +335,17 @@ const DirectorReviewView = ({ reviewId }) => {
 
   if (showNamePrompt) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">Director Review Access</h2>
-          <p className="text-gray-600 mb-6">
-            Please select your name to access the meeting review:
-          </p>
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                setDirectorName('Hans Ringström, Director');
-                setShowNamePrompt(false);
-              }}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
-            >
-              <span>Hans Ringström</span>
-              <span className="text-sm text-indigo-200">Director</span>
-            </button>
-            <button
-              onClick={() => {
-                setDirectorName('Georgios Dimitroglou Rizell, Deputy Director');
-                setShowNamePrompt(false);
-              }}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-lg font-semibold transition text-left flex items-center justify-between"
-            >
-              <span>Georgios Dimitroglou Rizell</span>
-              <span className="text-sm text-indigo-200">Deputy Director</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <IdentityPicker
+        title="Director Review Access"
+        subtitle="Please select your name to access the meeting review:"
+        people={directors}
+        onPick={pickDirector}
+        loading={identityConfigState === 'loading'}
+        error={identityConfigState === 'error'
+          ? 'Could not load the director list. Please check your connection and try again.'
+          : null}
+        onRetry={loadDirectors}
+      />
     );
   }
 
@@ -357,6 +383,7 @@ const DirectorReviewView = ({ reviewId }) => {
               <p className="text-gray-600 mt-2">Welcome, {directorName}</p>
             </div>
             <div className="flex items-center gap-4">
+              <IdentityChip person={directorPerson || { name: directorName }} onSwitch={switchDirector} />
               <button
                 onClick={exportToOutlook}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 transition"
