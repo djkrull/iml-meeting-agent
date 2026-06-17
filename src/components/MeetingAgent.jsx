@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
@@ -44,6 +44,9 @@ const MeetingAgent = () => {
   const [currentReviewId, setCurrentReviewId] = useState(() => {
     return localStorage.getItem('iml-current-review-id') || null;
   });
+  // True while a save to the backend is in-flight, so the focus re-sync never
+  // overwrites local state mid-save (which could drop a just-made edit).
+  const savingRef = useRef(false);
 
   // Load programs and meetings from backend on component mount
   useEffect(() => {
@@ -110,9 +113,17 @@ const MeetingAgent = () => {
         const review = await response.json();
         if (!review.meetings) return;
 
-        // Merge approval data with existing meetings
+        // Merge approval data with existing meetings.
+        // IMPORTANT: only produce new array/object references when approval data
+        // actually changed. Returning the same references when nothing changed keeps
+        // React from re-rendering, which in turn keeps the auto-save effect from
+        // firing. Otherwise this read-only 30s refresh would re-write this tab's
+        // (possibly stale) meeting times back over the DB every 30s and clobber
+        // out-of-band edits (e.g. ones made directly by an agent). [root cause of
+        // the "my time change keeps reverting to the old value" bug]
         setMeetings(currentMeetings => {
-          return currentMeetings.map(meeting => {
+          let changed = false;
+          const next = currentMeetings.map(meeting => {
             const dbMeeting = review.meetings.find(m => {
               // Must match program name and type
               if (m.program_name !== meeting.programName || m.type !== meeting.type) return false;
@@ -128,25 +139,35 @@ const MeetingAgent = () => {
               return true;
             });
 
-            if (dbMeeting) {
-              const approvedCount = dbMeeting.approvals?.filter(a =>
-                a.status === 'approved' || a.status === 'accepted'
-              ).length || 0;
+            if (!dbMeeting) return meeting;
 
-              const rejectedCount = dbMeeting.approvals?.filter(a =>
-                a.status === 'rejected' || a.status === 'declined'
-              ).length || 0;
+            const approvedCount = dbMeeting.approvals?.filter(a =>
+              a.status === 'approved' || a.status === 'accepted'
+            ).length || 0;
 
-              return {
-                ...meeting,
-                approvedCount,
-                rejectedCount,
-                approvals: dbMeeting.approvals || [],
-                approved: approvedCount > 0 && rejectedCount === 0
-              };
+            const rejectedCount = dbMeeting.approvals?.filter(a =>
+              a.status === 'rejected' || a.status === 'declined'
+            ).length || 0;
+
+            const approved = approvedCount > 0 && rejectedCount === 0;
+            const approvals = dbMeeting.approvals || [];
+
+            // No approval-relevant change → keep the same object reference.
+            if (
+              meeting.approvedCount === approvedCount &&
+              meeting.rejectedCount === rejectedCount &&
+              meeting.approved === approved &&
+              (meeting.approvals?.length || 0) === approvals.length
+            ) {
+              return meeting;
             }
-            return meeting;
+
+            changed = true;
+            return { ...meeting, approvedCount, rejectedCount, approvals, approved };
           });
+
+          // Nothing changed → return the SAME array so no re-render / no auto-save.
+          return changed ? next : currentMeetings;
         });
 
         console.log('[AUTO-REFRESH] Director approvals loaded successfully');
@@ -165,12 +186,70 @@ const MeetingAgent = () => {
     return () => clearInterval(intervalId);
   }, [initialLoadComplete, currentReviewId, meetings.length]);
 
+  // Re-sync meeting scheduling fields (date/time/duration) from the server when the
+  // tab regains focus or becomes visible. This makes out-of-band edits (e.g. ones
+  // made directly in the DB by an agent) appear here without a manual reload, and
+  // ensures this tab never holds — and therefore can never auto-save — a stale time
+  // over a newer server value. Approval fields are left untouched (the 30s refresh
+  // above owns those). Skipped while a save is in-flight so it can't drop a fresh
+  // local edit.
+  useEffect(() => {
+    if (!initialLoadComplete) return;
+
+    const resyncScheduleFromServer = async () => {
+      if (savingRef.current) return; // don't fight an in-flight save
+      try {
+        const response = await fetch(`${API_URL}/api/programs`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data.meetings) return;
+
+        setMeetings(currentMeetings => {
+          let changed = false;
+          const next = currentMeetings.map(meeting => {
+            const fresh = data.meetings.find(m => {
+              if (m.programName !== meeting.programName || m.type !== meeting.type) return false;
+              if (meeting.programName === 'All Summer Conferences') {
+                const mYear = (meeting.date instanceof Date ? meeting.date : new Date(meeting.date)).getFullYear();
+                return new Date(m.date).getFullYear() === mYear;
+              }
+              return true;
+            });
+            if (!fresh) return meeting;
+
+            const freshMs = new Date(fresh.date).getTime();
+            const curMs = (meeting.date instanceof Date ? meeting.date : new Date(meeting.date)).getTime();
+            if (meeting.time === fresh.time && meeting.duration === fresh.duration && curMs === freshMs) {
+              return meeting; // already up to date
+            }
+
+            changed = true;
+            return { ...meeting, time: fresh.time, duration: fresh.duration, date: new Date(fresh.date) };
+          });
+
+          return changed ? next : currentMeetings;
+        });
+      } catch (e) {
+        // network hiccup — ignore, will retry on next focus
+      }
+    };
+
+    const onVisible = () => { if (document.visibilityState === 'visible') resyncScheduleFromServer(); };
+    window.addEventListener('focus', resyncScheduleFromServer);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', resyncScheduleFromServer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [initialLoadComplete]);
+
   // Save programs and meetings to backend whenever they change
   useEffect(() => {
     const saveToBackend = async () => {
       if (!initialLoadComplete) return; // Don't save during initial load
       if (programs.length === 0 && meetings.length === 0) return;
 
+      savingRef.current = true;
       try {
         console.log('Saving to backend...');
         const response = await fetch(`${API_URL}/api/programs`, {
@@ -195,6 +274,8 @@ const MeetingAgent = () => {
         alert(`⚠️ NETWORK ERROR saving to database\n\nYour changes are only in the browser. Error: ${error.message}`);
         localStorage.setItem('iml-programs', JSON.stringify(programs));
         localStorage.setItem('iml-meetings', JSON.stringify(meetings));
+      } finally {
+        savingRef.current = false;
       }
     };
 
@@ -314,9 +395,13 @@ const MeetingAgent = () => {
       },
       {
         name: 'Introduction Meeting - Group 2',
-        leadTime: -240, // Same day as Group 1, right after
+        leadTime: -240, // Same day as Group 1
         weekday: 5, // Friday
-        time: '11:30',
+        // RULE: Summer-conference Introduction Meetings always run Group 1 in the
+        // morning (11:00) and Group 2 in the afternoon (15:00), so overseas
+        // organizers (e.g. USA) can join Group 2 during their morning. Keep this
+        // 11:00 / 15:00 split for all future years (2028+). See CLAUDE.md.
+        time: '15:00',
         participants: ['Conference Organizer Group 2', 'Admin Team', 'Directors'],
         duration: 30,
         description: 'Initial planning for second conference group'
@@ -332,9 +417,11 @@ const MeetingAgent = () => {
       },
       {
         name: 'Check-in Meeting - Group 2',
-        leadTime: -90, // Same day as Group 1, right after
+        leadTime: -90, // Same day as Group 1
         weekday: 5, // Friday
-        time: '11:30',
+        // RULE: same morning/afternoon split as the Introduction Meeting —
+        // Group 1 at 11:00, Group 2 at 15:00. See note above and CLAUDE.md.
+        time: '15:00',
         participants: ['Conference Organizer Group 2', 'Admin Team'],
         duration: 30,
         description: 'Pre-conference preparations review'
@@ -1658,90 +1745,66 @@ const MeetingAgent = () => {
     }
   };
 
-  // Export to ICS (iCalendar) format for Outlook.
-  // Exports all UPCOMING meetings; non-approved ones are tagged STATUS:TENTATIVE
-  // and get a [PRELIMINÄR] prefix so they appear as preliminary in Outlook.
-  const exportToICS = () => {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const upcoming = meetings.filter(m => {
-      const d = m.date instanceof Date ? m.date : new Date(m.date);
-      return d >= todayStart;
-    });
+  // ---- Shared ICS (iCalendar) helpers ----
 
-    if (upcoming.length === 0) {
-      alert('Inga framtida möten att exportera.');
-      return;
-    }
+  // A meeting counts as "confirmed" for Outlook when its own flag/status says so.
+  const isApproved = m => m.approved || m.status === 'scheduled';
 
-    const isApproved = m => m.approved || m.status === 'scheduled';
-    const approvedCount = upcoming.filter(isApproved).length;
-    const tentativeCount = upcoming.length - approvedCount;
+  // Format a date + "HH:MM" time string as an ICS local datetime (YYYYMMDDTHHMMSS).
+  const formatICSDateTime = (date, time) => {
+    const [hours, minutes] = time.split(':');
+    const dt = new Date(date);
+    dt.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
-    if (tentativeCount > 0) {
-      const ok = window.confirm(
-        `Exportera ${upcoming.length} framtida möten?\n\n` +
-        `  ✅ ${approvedCount} godkända (STATUS: CONFIRMED)\n` +
-        `  ⚠ ${tentativeCount} ej godkända (STATUS: TENTATIVE + [PRELIMINÄR]-prefix)\n\n` +
-        `Den exporterade filen är en preliminär kalender — ej godkända möten visas som tentativa i Outlook.`
-      );
-      if (!ok) return;
-    }
+    const year = dt.getFullYear();
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const hour = String(dt.getHours()).padStart(2, '0');
+    const minute = String(dt.getMinutes()).padStart(2, '0');
 
-    // Helper function to format date/time for ICS
-    const formatICSDateTime = (date, time) => {
-      const [hours, minutes] = time.split(':');
-      const dt = new Date(date);
-      dt.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+    return `${year}${month}${day}T${hour}${minute}00`;
+  };
 
-      // Format as YYYYMMDDTHHMMSS
-      const year = dt.getFullYear();
-      const month = String(dt.getMonth() + 1).padStart(2, '0');
-      const day = String(dt.getDate()).padStart(2, '0');
-      const hour = String(dt.getHours()).padStart(2, '0');
-      const minute = String(dt.getMinutes()).padStart(2, '0');
+  // Add durationMinutes to an ICS datetime string and return a new ICS datetime.
+  const calculateEndTime = (startDateTime, durationMinutes) => {
+    const dt = new Date(startDateTime.slice(0, 4),
+                       parseInt(startDateTime.slice(4, 6)) - 1,
+                       startDateTime.slice(6, 8),
+                       startDateTime.slice(9, 11),
+                       startDateTime.slice(11, 13));
+    dt.setMinutes(dt.getMinutes() + durationMinutes);
 
-      return `${year}${month}${day}T${hour}${minute}00`;
-    };
+    const year = dt.getFullYear();
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const hour = String(dt.getHours()).padStart(2, '0');
+    const minute = String(dt.getMinutes()).padStart(2, '0');
 
-    // Helper function to calculate end time
-    const calculateEndTime = (startDateTime, durationMinutes) => {
-      const dt = new Date(startDateTime.slice(0, 4),
-                         parseInt(startDateTime.slice(4, 6)) - 1,
-                         startDateTime.slice(6, 8),
-                         startDateTime.slice(9, 11),
-                         startDateTime.slice(11, 13));
-      dt.setMinutes(dt.getMinutes() + durationMinutes);
+    return `${year}${month}${day}T${hour}${minute}00`;
+  };
 
-      const year = dt.getFullYear();
-      const month = String(dt.getMonth() + 1).padStart(2, '0');
-      const day = String(dt.getDate()).padStart(2, '0');
-      const hour = String(dt.getHours()).padStart(2, '0');
-      const minute = String(dt.getMinutes()).padStart(2, '0');
-
-      return `${year}${month}${day}T${hour}${minute}00`;
-    };
-
-    // Build ICS file content
-    const calNameSuffix = tentativeCount > 0 ? ' (preliminär)' : '';
-    let icsContent = [
+  // Build a full VCALENDAR string from a list of meetings.
+  // forceConfirmed=true marks every event STATUS:CONFIRMED with no [PRELIMINÄR]
+  // prefix (used by the approved-only export, where every meeting is already approved).
+  const buildICSCalendar = (meetingList, { calName, calDesc = '', forceConfirmed = false } = {}) => {
+    const icsContent = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//IML Meeting Agent//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
-      `X-WR-CALNAME:IML Meetings${calNameSuffix}`,
+      `X-WR-CALNAME:${calName}`,
       'X-WR-TIMEZONE:Europe/Stockholm'
     ];
-    if (tentativeCount > 0) {
-      icsContent.push(`X-WR-CALDESC:Preliminär kalender — ${tentativeCount} av ${upcoming.length} möten är ännu ej godkända av direktörerna.`);
+    if (calDesc) {
+      icsContent.push(`X-WR-CALDESC:${calDesc}`);
     }
 
-    upcoming.forEach((meeting, index) => {
+    meetingList.forEach((meeting) => {
       const startDateTime = formatICSDateTime(meeting.date, meeting.time);
       const endDateTime = calculateEndTime(startDateTime, meeting.duration);
       const timestamp = formatICSDateTime(new Date(), '12:00');
-      const approved = isApproved(meeting);
+      const approved = forceConfirmed || isApproved(meeting);
       const summaryPrefix = approved ? '' : '[PRELIMINÄR] ';
       const status = approved ? 'CONFIRMED' : 'TENTATIVE';
       const descNote = approved ? '' : 'OBS: Detta möte är ännu ej godkänt av direktörerna.\\n\\n';
@@ -1760,17 +1823,84 @@ const MeetingAgent = () => {
     });
 
     icsContent.push('END:VCALENDAR');
+    return icsContent.join('\r\n');
+  };
 
-    // Create and download the file
-    const icsBlob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+  // Trigger a browser download of an .ics file.
+  const downloadICS = (icsString, filename) => {
+    const icsBlob = new Blob([icsString], { type: 'text/calendar;charset=utf-8' });
     const url = URL.createObjectURL(icsBlob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `IML_Meetings_${new Date().toISOString().split('T')[0]}.ics`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  // Export to ICS (iCalendar) format for Outlook.
+  // Exports all UPCOMING meetings; non-approved ones are tagged STATUS:TENTATIVE
+  // and get a [PRELIMINÄR] prefix so they appear as preliminary in Outlook.
+  const exportToICS = () => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const upcoming = meetings.filter(m => {
+      const d = m.date instanceof Date ? m.date : new Date(m.date);
+      return d >= todayStart;
+    });
+
+    if (upcoming.length === 0) {
+      alert('Inga framtida möten att exportera.');
+      return;
+    }
+
+    const approvedCount = upcoming.filter(isApproved).length;
+    const tentativeCount = upcoming.length - approvedCount;
+
+    if (tentativeCount > 0) {
+      const ok = window.confirm(
+        `Exportera ${upcoming.length} framtida möten?\n\n` +
+        `  ✅ ${approvedCount} godkända (STATUS: CONFIRMED)\n` +
+        `  ⚠ ${tentativeCount} ej godkända (STATUS: TENTATIVE + [PRELIMINÄR]-prefix)\n\n` +
+        `Den exporterade filen är en preliminär kalender — ej godkända möten visas som tentativa i Outlook.`
+      );
+      if (!ok) return;
+    }
+
+    const calDesc = tentativeCount > 0
+      ? `Preliminär kalender — ${tentativeCount} av ${upcoming.length} möten är ännu ej godkända av direktörerna.`
+      : '';
+    const icsString = buildICSCalendar(upcoming, {
+      calName: `IML Meetings${tentativeCount > 0 ? ' (preliminär)' : ''}`,
+      calDesc
+    });
+    downloadICS(icsString, `IML_Meetings_${new Date().toISOString().split('T')[0]}.ics`);
+  };
+
+  // Export ONLY meetings that at least one director has accepted (approvedCount >= 1,
+  // i.e. one or two directors have said yes). Every exported event is STATUS:CONFIRMED.
+  // Like exportToICS, this is limited to upcoming (future) meetings.
+  const exportApprovedToICS = () => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const approvedUpcoming = meetings.filter(m => {
+      const d = m.date instanceof Date ? m.date : new Date(m.date);
+      if (d < todayStart) return false;
+      return (m.approvedCount || 0) >= 1;
+    });
+
+    if (approvedUpcoming.length === 0) {
+      alert('Inga godkända framtida möten att exportera.\n\n(Ett möte räknas som godkänt när minst en director har tackat ja.)');
+      return;
+    }
+
+    const icsString = buildICSCalendar(approvedUpcoming, {
+      calName: 'IML Meetings (godkända)',
+      calDesc: `Endast möten godkända av minst en director — ${approvedUpcoming.length} möten.`,
+      forceConfirmed: true
+    });
+    downloadICS(icsString, `IML_Approved_Meetings_${new Date().toISOString().split('T')[0]}.ics`);
   };
 
   // Toggle filter
@@ -2446,6 +2576,14 @@ const MeetingAgent = () => {
               >
                 <CalendarDays className="w-5 h-5" />
                 Export to Outlook (.ics)
+              </button>
+              <button
+                onClick={exportApprovedToICS}
+                title="Exporterar endast möten där minst en director har tackat ja"
+                className="bg-teal-100 text-teal-800 hover:bg-teal-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+              >
+                <CalendarCheck className="w-5 h-5" />
+                Export Approved Meetings (.ics)
               </button>
               <button
                 onClick={exportToExcel}
