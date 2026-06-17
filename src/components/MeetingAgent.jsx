@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
+import SettingsPanel from './Settings';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
@@ -31,6 +32,7 @@ const MeetingAgent = () => {
   const [adminList, setAdminList] = useState([]);
   const [adminIdentity, setAdminIdentity] = useState(null);
   const [identityConfigState, setIdentityConfigState] = useState('loading'); // 'loading' | 'ready' | 'error'
+  const [showSettings, setShowSettings] = useState(false);
 
   // Load the admin roster from settings, then resolve any remembered identity.
   const loadAdminRoster = React.useCallback(async () => {
@@ -2250,9 +2252,21 @@ const MeetingAgent = () => {
             </div>
             <div className="flex items-center gap-4">
               <IdentityChip person={adminIdentity} onSwitch={switchAdminIdentity} />
+              <button
+                onClick={() => setShowSettings(true)}
+                title="Inställningar"
+                className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition"
+              >
+                <Settings className="w-5 h-5" />
+                Inställningar
+              </button>
               <Calendar className="w-16 h-16 text-indigo-600" />
             </div>
           </div>
+
+          {showSettings && (
+            <SettingsPanel onClose={() => { setShowSettings(false); loadAdminRoster(); }} />
+          )}
 
           {/* File Upload */}
           <div
