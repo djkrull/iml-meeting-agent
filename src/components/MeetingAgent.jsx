@@ -35,6 +35,7 @@ const MeetingAgent = () => {
   const [identityConfigState, setIdentityConfigState] = useState('loading'); // 'loading' | 'ready' | 'error'
   const [showSettings, setShowSettings] = useState(false);
   const [appConfig, setAppConfig] = useState(null); // full app_settings config (meeting rules, rosters, ...)
+  const [regenPreview, setRegenPreview] = useState(null); // { regenerated, changes, weeklyOld, weeklyNew, oldCount, newCount }
 
   // Load the admin roster from settings, then resolve any remembered identity.
   const loadAdminRoster = React.useCallback(async () => {
@@ -500,7 +501,8 @@ const MeetingAgent = () => {
       console.log('Filtered programs:', reclassified);
       console.log(`Kept ${reclassified.length} current/future programs (filtered out ${parsedPrograms.length - reclassified.length})`);
       setPrograms(reclassified);
-      generateMeetings(reclassified);
+      const generated = generateMeetings(reclassified);
+      if (generated) setMeetings(generated);
     } catch (error) {
       console.error('Error loading file:', error);
       alert(`Error loading Excel file: ${error.message}`);
@@ -786,11 +788,90 @@ const MeetingAgent = () => {
     });
 
     console.log(`Generated ${generatedMeetings.length} total meetings, kept ${futureMeetings.length} future meetings`);
-    setMeetings(futureMeetings);
+    return futureMeetings;
   };
 
-  // Calculate meeting date based on lead time and constraints
   // (old calculateMeetingDate removed — replaced by src/utils/meetingRuleEngine.resolveMeetingDate)
+
+  // Regenerate meetings from the current programs + current config rules, and show
+  // a diff for confirmation before applying ("only forward" — nothing is written
+  // until the admin confirms). Times are inherited from existing meetings, so a
+  // rule change mostly surfaces as date shifts.
+  const regenerateMeetings = () => {
+    if (!programs || programs.length === 0) { alert('Inga program att regenerera från.'); return; }
+    const regenerated = generateMeetings(programs);
+    if (!regenerated) return; // guard already alerted (config not loaded)
+
+    const ymd = (d) => {
+      const x = d instanceof Date ? d : new Date(d);
+      return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+    };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const isFuture = (m) => (m.date instanceof Date ? m.date : new Date(m.date)) >= today;
+    const isWeekly = (m) => (m.type || '').includes('Weekly');
+    const keyOf = (m) => `${m.programName}|${m.type}|${m.programYear ?? new Date(m.date).getFullYear()}`;
+
+    // Only future meetings are regenerated; past meetings are preserved untouched.
+    const pastMeetings = meetings.filter(m => !isFuture(m));
+    const curFut = meetings.filter(isFuture);
+    const curNW = curFut.filter(m => !isWeekly(m));
+    const newNW = regenerated.filter(m => !isWeekly(m));
+    const curMap = new Map(curNW.map(m => [keyOf(m), m]));
+    const seen = new Set();
+    const changes = [];
+    newNW.forEach(nm => {
+      const k = keyOf(nm); seen.add(k);
+      const cm = curMap.get(k);
+      if (!cm) changes.push({ kind: 'added', label: `${nm.type} — ${nm.programName}`, newD: ymd(nm.date), newT: nm.time });
+      else {
+        const dCh = ymd(cm.date) !== ymd(nm.date);
+        const tCh = cm.time !== nm.time;
+        if (dCh || tCh) changes.push({ kind: 'changed', label: `${nm.type} — ${nm.programName}`, oldD: ymd(cm.date), oldT: cm.time, newD: ymd(nm.date), newT: nm.time });
+      }
+    });
+    curNW.forEach(cm => { if (!seen.has(keyOf(cm))) changes.push({ kind: 'removed', label: `${cm.type} — ${cm.programName}`, oldD: ymd(cm.date), oldT: cm.time }); });
+
+    // Weekly meetings: surface a summary if their dates/times differ, so the
+    // confirmation never hides a weekday/time change (codex P2).
+    const weeklyKey = (m) => `${m.programName}|${m.type}|${ymd(m.date)}|${m.time}`;
+    const curW = new Set(curFut.filter(isWeekly).map(weeklyKey));
+    const newWkeys = regenerated.filter(isWeekly).map(weeklyKey);
+    let weeklyChanged = curW.size !== newWkeys.length;
+    if (!weeklyChanged) { for (const k of newWkeys) { if (!curW.has(k)) { weeklyChanged = true; break; } } }
+    const weeklyOld = curFut.length - curNW.length;
+    const weeklyNew = regenerated.length - newNW.length;
+    if (weeklyChanged) {
+      changes.push({ kind: 'weekly', label: 'Veckomöten (Welcome / Onboarding light)', oldT: `${weeklyOld} st`, newT: `${weeklyNew} st — datum/tid uppdateras` });
+    }
+
+    setRegenPreview({
+      finalMeetings: [...pastMeetings, ...regenerated],
+      futureMeetings: regenerated,
+      changes, weeklyOld, weeklyNew,
+      oldCount: curFut.length, newCount: regenerated.length,
+      pastCount: pastMeetings.length,
+    });
+  };
+
+  // Persist via the dedicated replace endpoint (deletes stale future rows so
+  // date-shifted meetings don't duplicate), then update local state.
+  const applyRegen = async () => {
+    if (!regenPreview) return;
+    try {
+      const res = await fetch(`${API_URL}/api/programs/replace-meetings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetings: regenPreview.futureMeetings })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setMeetings(regenPreview.finalMeetings);
+      setRegenPreview(null);
+    } catch (e) {
+      console.error('Failed to apply regeneration:', e);
+      alert('Kunde inte spara regenererade möten: ' + e.message);
+    }
+  };
+
   // Format date for display
   const formatDate = (date) => {
     if (!date) return 'N/A';
@@ -2039,6 +2120,14 @@ const MeetingAgent = () => {
             <div className="flex items-center gap-4">
               <IdentityChip person={adminIdentity} onSwitch={switchAdminIdentity} />
               <button
+                onClick={regenerateMeetings}
+                title="Beräkna om alla mötesdatum från aktuella regler (visar diff innan ändring)"
+                className="flex items-center gap-2 bg-amber-100 hover:bg-amber-200 text-amber-800 px-4 py-2 rounded-lg font-medium transition"
+              >
+                <RefreshCw className="w-5 h-5" />
+                Regenerera
+              </button>
+              <button
                 onClick={() => setShowSettings(true)}
                 title="Inställningar"
                 className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition"
@@ -2052,6 +2141,50 @@ const MeetingAgent = () => {
 
           {showSettings && (
             <SettingsPanel onClose={() => { setShowSettings(false); loadAdminRoster(); }} />
+          )}
+
+          {regenPreview && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-gray-800">Regenerera möten</h2>
+                  <button onClick={() => setRegenPreview(null)} className="text-gray-500 hover:text-gray-800" title="Stäng">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                <div className="p-6 overflow-y-auto">
+                  <p className="text-sm text-gray-600 mb-3">
+                    Från {programs.length} program: {regenPreview.oldCount} → <strong>{regenPreview.newCount}</strong> möten.
+                    {regenPreview.weeklyOld !== regenPreview.weeklyNew && (
+                      <> Veckomöten: {regenPreview.weeklyOld} → {regenPreview.weeklyNew}.</>
+                    )}
+                  </p>
+                  {regenPreview.changes.length === 0 ? (
+                    <p className="text-green-700">Inga ändringar på enskilda möten — datum/tider ligger redan i linje med reglerna.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {regenPreview.changes.map((c, i) => (
+                        <div key={i} className="text-sm border border-gray-200 rounded-lg p-2">
+                          <div className="font-medium text-gray-800">{c.label}</div>
+                          {c.kind === 'changed' && <div className="text-gray-600">{c.oldD} {c.oldT} → <strong>{c.newD} {c.newT}</strong></div>}
+                          {c.kind === 'added' && <div className="text-green-700">Nytt: {c.newD} {c.newT}</div>}
+                          {c.kind === 'removed' && <div className="text-red-700">Tas bort: {c.oldD} {c.oldT}</div>}
+                          {c.kind === 'weekly' && <div className="text-blue-700">{c.oldT} → {c.newT}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+                  <button onClick={() => setRegenPreview(null)} className="px-4 py-2 rounded-lg font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">
+                    Avbryt
+                  </button>
+                  <button onClick={applyRegen} className="px-4 py-2 rounded-lg font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition">
+                    Applicera ({regenPreview.newCount} möten)
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* File Upload */}

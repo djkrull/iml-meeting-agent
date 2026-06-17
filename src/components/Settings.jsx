@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings as SettingsIcon, Lock, Plus, Trash2, X, Save, Users, UserCog, Calendar } from 'lucide-react';
+import MeetingRulesEditor from './MeetingRulesEditor';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
@@ -171,12 +172,10 @@ const Settings = ({ onClose }) => {
           {!config && !loadError && <p className="text-gray-600">Laddar…</p>}
 
           {config && activeTab === 'rules' && (
-            <div className="text-gray-600">
-              <p className="mb-2">Mötesreglerna (lead time, veckodag, tid, längd m.m.) blir redigerbara här i nästa steg (Fas 4–5).</p>
-              <p className="text-sm text-gray-500">
-                Sätt: {Object.keys(config.meetingRules || {}).join(', ')}.
-              </p>
-            </div>
+            <MeetingRulesEditor
+              rules={config.meetingRules || {}}
+              onChange={(newRules) => setConfig(prev => ({ ...prev, meetingRules: newRules }))}
+            />
           )}
 
           {config && activeTab === 'directors' && (

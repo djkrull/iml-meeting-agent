@@ -392,6 +392,71 @@ const dbHelpers = {
     });
   },
 
+  // Replace all FUTURE program_meetings with the provided list, transactionally.
+  // Used by "Regenerate": date-shifted meetings would otherwise leave stale rows
+  // (the unique constraint includes `date`, and the normal save only upserts), so
+  // we delete future rows first, then insert the regenerated set. Past rows and the
+  // approvals table (which references the separate `meetings` table) are untouched.
+  replaceFutureMeetings: (meetings) => {
+    return new Promise(async (resolve, reject) => {
+      const now = new Date().toISOString();
+      const list = Array.isArray(meetings) ? meetings : [];
+      if (USE_POSTGRES) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          // Delete future rows using the Stockholm-local date (double cast).
+          await client.query(
+            `DELETE FROM program_meetings
+             WHERE (date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Stockholm')::date
+                   >= (now() AT TIME ZONE 'Europe/Stockholm')::date`
+          );
+          for (const m of list) {
+            const meetingDate = typeof m.date === 'string' ? m.date : m.date.toISOString();
+            await client.query(
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+               ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
+               DO UPDATE SET time = EXCLUDED.time, duration = EXCLUDED.duration,
+                 participants = EXCLUDED.participants, description = EXCLUDED.description,
+                 status = EXCLUDED.status, approved = EXCLUDED.approved,
+                 program_organizer = EXCLUDED.program_organizer, updated_at = EXCLUDED.updated_at`,
+              [m.id, m.programId, m.programName, m.programType, m.programYear, m.programOrganizer,
+               m.type, meetingDate, m.time, m.duration, JSON.stringify(m.participants),
+               m.description, m.status || 'pending', m.approved || false, now, now]
+            );
+          }
+          await client.query('COMMIT');
+          resolve({ replaced: list.length });
+        } catch (err) {
+          await client.query('ROLLBACK');
+          reject(err);
+        } finally {
+          client.release();
+        }
+      } else {
+        // SQLite (local dev): dates stored as ISO (UTC); compare to local midnight.
+        const todayIso = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+        db.serialize(() => {
+          db.run('DELETE FROM program_meetings WHERE date >= ?', [todayIso], (delErr) => {
+            if (delErr) return reject(delErr);
+            const stmt = db.prepare(
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            );
+            list.forEach(m => {
+              const meetingDate = typeof m.date === 'string' ? m.date : m.date.toISOString();
+              stmt.run(m.id, m.programId, m.programName, m.programType, m.programYear, m.programOrganizer,
+                m.type, meetingDate, m.time, m.duration, JSON.stringify(m.participants),
+                m.description, m.status || 'pending', m.approved ? 1 : 0, now, now);
+            });
+            stmt.finalize((finErr) => finErr ? reject(finErr) : resolve({ replaced: list.length }));
+          });
+        });
+      }
+    });
+  },
+
   // Create new review
   createReview: (reviewId, createdBy) => {
     return new Promise(async (resolve, reject) => {

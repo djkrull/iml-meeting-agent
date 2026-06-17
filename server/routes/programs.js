@@ -54,6 +54,23 @@ router.post('/cleanup', async (req, res) => {
   }
 });
 
+// Replace all FUTURE program_meetings (used by "Regenerate"). Deletes future rows
+// then inserts the provided regenerated set, so date-shifted meetings don't leave
+// stale duplicates. Past rows + approvals are untouched.
+router.post('/replace-meetings', async (req, res) => {
+  try {
+    const { meetings } = req.body;
+    if (!Array.isArray(meetings)) {
+      return res.status(400).json({ error: 'meetings array is required' });
+    }
+    const result = await dbHelpers.replaceFutureMeetings(meetings);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error replacing future meetings:', error);
+    res.status(500).json({ error: 'Failed to replace meetings', details: error.message });
+  }
+});
+
 // Get all programs and meetings
 router.get('/', async (req, res) => {
   try {
