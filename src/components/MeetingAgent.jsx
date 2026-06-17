@@ -3,6 +3,7 @@ import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet
 import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
+import { resolveMeetingDate } from '../utils/meetingRuleEngine';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
@@ -33,6 +34,7 @@ const MeetingAgent = () => {
   const [adminIdentity, setAdminIdentity] = useState(null);
   const [identityConfigState, setIdentityConfigState] = useState('loading'); // 'loading' | 'ready' | 'error'
   const [showSettings, setShowSettings] = useState(false);
+  const [appConfig, setAppConfig] = useState(null); // full app_settings config (meeting rules, rosters, ...)
 
   // Load the admin roster from settings, then resolve any remembered identity.
   const loadAdminRoster = React.useCallback(async () => {
@@ -41,6 +43,7 @@ const MeetingAgent = () => {
       const res = await fetch(`${API_URL}/api/settings`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      setAppConfig(data.config || null);
       const admins = (data.config?.admins || []).filter(a => a.active !== false);
       setAdminList(admins);
       const storedId = readStoredIdentityId(ADMIN_IDENTITY_KEY);
@@ -327,169 +330,8 @@ const MeetingAgent = () => {
   // Debug: Component loaded
   console.log('MeetingAgent component loaded');
 
-  // Meeting type definitions
-  // Introduction Meeting offsets are versioned by program-year. From FP28+/SP29+
-  // IML brings the kick-off forward 2 months (Mar -> Jan for FP, equivalent for SP).
-  // Older programs keep the original -540d offset.
-  // See: imlass/skills/iml-pp-tidsplan-info-organizers/SKILL.md (canonical timeline).
-  const introMeetingOld = {
-    name: 'Introduction Meeting',
-    leadTime: -540, // 18 months before — pre-FP28 / pre-SP29
-    weekday: 5,
-    time: '10:00',
-    participants: ['Program Organizers', 'Directors', 'Admin Coordinator'],
-    duration: 30,
-    description: 'Initial program planning and expectations'
-  };
-  const introMeetingFallNew   = { ...introMeetingOld, leadTime: -600 }; // 20 mån — FP28+
-  const introMeetingSpringNew = { ...introMeetingOld, leadTime: -600 }; // 20 mån — SP29+
-
-  // The non-Intro Spring/Fall meetings (Check-ins, Onboarding, Program Start,
-  // Mid-term, Evaluation) are NOT affected by the versioning.
-  const commonSpringFallMeetings = [
-      {
-        name: 'Check-in meeting with organizers',
-        leadTime: -180, // 6 months before
-        weekday: 5, // Friday
-        time: '10:00',
-        participants: ['Program Organizers', 'Admin Team', 'Directors'],
-        duration: 30,
-        description: 'Review preparations and logistics'
-      },
-      {
-        name: 'Check-in meeting junior fellows',
-        leadTime: -180, // 6 months before (same day, right after organizers)
-        weekday: 5, // Friday
-        time: '10:30',
-        participants: ['Junior Fellows', 'Admin Team', 'Directors'],
-        duration: 30,
-        description: 'Junior fellow orientation and support'
-      },
-      {
-        name: 'Onboarding meeting',
-        leadTime: -5, // Friday before program start
-        weekday: 5, // Friday
-        participants: ['Admin Team', 'Organizers', 'Directors'],
-        duration: 30,
-        description: 'Practical information and house rules'
-      },
-      {
-        name: 'Program Start Meeting',
-        leadTime: 0, // On program start day
-        participants: ['Program Organizers', 'All Participants', 'Directors'],
-        duration: 30,
-        description: 'Official program kickoff'
-      },
-      {
-        name: 'Mid-term meeting',
-        leadTime: 42, // ~6 weeks in
-        weekday: 5, // Friday
-        participants: ['Program Organizers', 'Admin Team', 'Directors'],
-        duration: 30,
-        description: 'Progress check and adjustments'
-      },
-      {
-        name: 'Evaluation meeting/lunch',
-        leadTime: 'end', // Special: Last Friday before program end
-        weekday: 5, // Friday
-        time: '12:00', // Lunch time
-        participants: ['Program Organizers', 'Directors'],
-        duration: 90, // Longer for lunch meeting
-        description: 'Program evaluation and feedback'
-      }
-    ];
-
-  // Legacy alias: full Spring/Fall meetings array using OLD Intro offset.
-  // Retained for backward-compat in any place still reading `springFallMeetings`
-  // directly; new code should use getMeetingTypes(program).
-  const springFallMeetings = [introMeetingOld, ...commonSpringFallMeetings];
-
-  const meetingTypes = {
-    'Spring Program': springFallMeetings,
-    'Fall Program': springFallMeetings,
-    'Kleindagarna': [
-      {
-        name: 'Meeting with organizer and B&P',
-        leadTime: -120, // 4 months before
-        weekday: 5, // Friday
-        participants: ['Event Organizer', 'B&P Team', 'Admin Coordinator'],
-        duration: 30,
-        description: 'Budget and planning coordination'
-      },
-      {
-        name: 'Check-in meeting with Organizer',
-        leadTime: -45, // 45 days before
-        weekday: 5, // Friday
-        participants: ['Event Organizer', 'Admin Team'],
-        duration: 30,
-        description: 'Final preparations and logistics'
-      }
-    ],
-    'Summer Conference': [
-      {
-        name: 'Introduction Meeting - Group 1',
-        leadTime: -240, // 8 months before
-        weekday: 5, // Friday
-        time: '11:00',
-        participants: ['Conference Organizer Group 1', 'Admin Team', 'Directors'],
-        duration: 30,
-        description: 'Initial planning for first conference group'
-      },
-      {
-        name: 'Introduction Meeting - Group 2',
-        leadTime: -240, // Same day as Group 1
-        weekday: 5, // Friday
-        // RULE: Summer-conference Introduction Meetings always run Group 1 in the
-        // morning (11:00) and Group 2 in the afternoon (15:00), so overseas
-        // organizers (e.g. USA) can join Group 2 during their morning. Keep this
-        // 11:00 / 15:00 split for all future years (2028+). See CLAUDE.md.
-        time: '15:00',
-        participants: ['Conference Organizer Group 2', 'Admin Team', 'Directors'],
-        duration: 30,
-        description: 'Initial planning for second conference group'
-      },
-      {
-        name: 'Check-in Meeting - Group 1',
-        leadTime: -90, // 3 months before
-        weekday: 5, // Friday
-        time: '11:00',
-        participants: ['Conference Organizer Group 1', 'Admin Team'],
-        duration: 30,
-        description: 'Pre-conference preparations review'
-      },
-      {
-        name: 'Check-in Meeting - Group 2',
-        leadTime: -90, // Same day as Group 1
-        weekday: 5, // Friday
-        // RULE: same morning/afternoon split as the Introduction Meeting —
-        // Group 1 at 11:00, Group 2 at 15:00. See note above and CLAUDE.md.
-        time: '15:00',
-        participants: ['Conference Organizer Group 2', 'Admin Team'],
-        duration: 30,
-        description: 'Pre-conference preparations review'
-      },
-      {
-        name: 'Weekly Onboarding meeting light',
-        leadTime: 0, // During conference period
-        recurring: 'weekly',
-        weekday: 1, // Monday
-        time: '09:30',
-        participants: ['Organizers', 'Admin Team'],
-        duration: 30,
-        description: 'Orientation for new organizers, zoom, lunches, photo etc...'
-      },
-      {
-        name: 'Weekly Welcome Meeting',
-        leadTime: 0,
-        recurring: 'weekly',
-        weekday: 1, // Monday
-        time: '10:00',
-        participants: ['All Conference Participants'],
-        duration: 15,
-        description: 'Weekly welcome and updates'
-      }
-    ]
-  };
+  // Meeting rules are configured in Settings (app_settings). Seed: server/defaultSettings.js;
+  // date resolution: src/utils/meetingRuleEngine (resolveMeetingDate).
 
   // Process file (shared between upload and drop)
   const processFile = async (file) => {
@@ -756,6 +598,10 @@ const MeetingAgent = () => {
 
   // Generate meetings based on program data
   const generateMeetings = (programList) => {
+    if (!appConfig?.meetingRules) {
+      alert('Inställningarna (mötesreglerna) är inte laddade ännu. Ladda om sidan och försök igen.');
+      return;
+    }
     const generatedMeetings = [];
     let meetingId = 1;
     const summerConferenceMeetings = new Map(); // Track shared summer conference meetings
@@ -780,19 +626,12 @@ const MeetingAgent = () => {
       return defaultTime;
     };
 
-    // Year-gated meeting type resolution.
-    // From FP28+/SP29+ Introduction Meeting uses the new -600d offset; older programs keep -540d.
+    // Meeting rules come from app_settings (config). resolveMeetingDate applies the
+    // year-gated offset override (e.g. Introduction Meeting FP28+/SP29+) internally,
+    // so no year branching is needed here.
     const getMeetingTypes = (program) => {
-      const yr = program.startDate instanceof Date
-        ? program.startDate.getFullYear()
-        : new Date(program.startDate).getFullYear();
-      if (program.type === 'Fall Program') {
-        return [yr >= 2028 ? introMeetingFallNew : introMeetingOld, ...commonSpringFallMeetings];
-      }
-      if (program.type === 'Spring Program') {
-        return [yr >= 2029 ? introMeetingSpringNew : introMeetingOld, ...commonSpringFallMeetings];
-      }
-      return meetingTypes[program.type] || [];
+      const rules = appConfig?.meetingRules?.[program.type];
+      return Array.isArray(rules) ? rules : [];
     };
 
     programList.forEach(program => {
@@ -808,16 +647,15 @@ const MeetingAgent = () => {
           // Use program-specific key for Kleindagarna (year-specific)
           const meetingKey = program.type === 'Summer Conference'
             ? `${program.type}_year${program.startDate.getFullYear()}_${meetingType.name}`
-            : `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.name}_${meetingType.leadTime}`;
+            : `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.id || meetingType.name}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
-            // Calculate date using original logic
-            let meetingDate = calculateMeetingDate(
+            // Resolve date from the configured rule (anchor + offset + placement).
+            let meetingDate = resolveMeetingDate(
+              meetingType,
               program.startDate,
               program.endDate,
-              meetingType.leadTime,
-              meetingType.weekday,
-              program.type
+              program.startDate.getFullYear()
             );
 
             if (meetingDate) {
@@ -869,7 +707,7 @@ const MeetingAgent = () => {
 
           let weekCount = 0;
           while (currentDate <= program.endDate && weekCount < maxWeeks) {
-            if (currentDate.getDay() === meetingType.weekday) {
+            if (currentDate.getDay() === meetingType.placement.weekday) {
               const inheritedTime = getInheritedTime(
                 program.type,
                 meetingType.name,
@@ -897,13 +735,12 @@ const MeetingAgent = () => {
             currentDate.setDate(currentDate.getDate() + 1);
           }
         } else if (!meetingType.recurring) {
-          // Calculate meeting date
-          let meetingDate = calculateMeetingDate(
+          // Resolve meeting date from the configured rule.
+          let meetingDate = resolveMeetingDate(
+            meetingType,
             program.startDate,
             program.endDate,
-            meetingType.leadTime,
-            meetingType.weekday,
-            program.type
+            program.startDate.getFullYear()
           );
 
           if (meetingDate) {
@@ -953,58 +790,7 @@ const MeetingAgent = () => {
   };
 
   // Calculate meeting date based on lead time and constraints
-  const calculateMeetingDate = (startDate, endDate, leadTime, weekday, programType) => {
-    if (!startDate) return null;
-
-    if (leadTime === 'end') {
-      // Special handling for evaluation meetings - last Friday before program end
-      if (programType === 'Spring Program' || programType === 'Fall Program') {
-        if (!endDate) return null;
-
-        // Start from program end date and go backwards to find last Friday
-        let evalDate = new Date(endDate);
-        const endDay = evalDate.getDay();
-
-        // Friday is day 5
-        if (endDay === 5) {
-          // End date is already Friday - use it
-          return evalDate;
-        } else if (endDay === 6) {
-          // Saturday - go back 1 day to Friday
-          evalDate.setDate(evalDate.getDate() - 1);
-        } else {
-          // Sunday (0) through Thursday (4) - go back to previous Friday
-          const daysToSubtract = endDay === 0 ? 2 : (endDay + 2);
-          evalDate.setDate(evalDate.getDate() - daysToSubtract);
-        }
-
-        return evalDate;
-      }
-    }
-
-    // Calculate date relative to program start
-    let targetDate = new Date(startDate.getTime());
-    targetDate.setDate(targetDate.getDate() + leadTime);
-
-    // Adjust to specific weekday if needed
-    if (weekday !== undefined) {
-      const currentDay = targetDate.getDay();
-      if (currentDay !== weekday) {
-        // Calculate days difference
-        let daysToAdd = weekday - currentDay;
-
-        // If the difference is negative or would go backwards, go to next week's target day
-        if (daysToAdd <= 0) {
-          daysToAdd += 7;
-        }
-
-        targetDate.setDate(targetDate.getDate() + daysToAdd);
-      }
-    }
-
-    return targetDate;
-  };
-
+  // (old calculateMeetingDate removed — replaced by src/utils/meetingRuleEngine.resolveMeetingDate)
   // Format date for display
   const formatDate = (date) => {
     if (!date) return 'N/A';
