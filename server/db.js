@@ -392,6 +392,39 @@ const dbHelpers = {
     });
   },
 
+  // Read the "active review" pointer — which director review the admin view
+  // should show approvals for. Stored inside the single app_settings config blob
+  // so it survives across devices (it previously lived ONLY in one browser's
+  // localStorage, so only the device that clicked "Share" ever saw approvals).
+  // Returns null if none set.
+  getActiveReviewId: () => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const cfg = await dbHelpers.getSettings();
+        resolve(cfg && cfg.activeReviewId ? cfg.activeReviewId : null);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Persist the "active review" pointer. Called whenever a review is created or
+  // updated (Share for Director Review / Sync All to Directors) so every admin
+  // device can fall back to it. Read-modify-write of the full config keeps
+  // directors / admins / meetingRules / PIN intact.
+  setActiveReviewId: (reviewId) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const cfg = await dbHelpers.getSettings();
+        cfg.activeReviewId = reviewId;
+        await dbHelpers.saveSettings(cfg);
+        resolve({ success: true });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
   // Replace all FUTURE program_meetings with the provided list, transactionally.
   // Used by "Regenerate": date-shifted meetings would otherwise leave stale rows
   // (the unique constraint includes `date`, and the normal save only upserts), so

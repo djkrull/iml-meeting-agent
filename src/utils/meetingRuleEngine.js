@@ -65,15 +65,24 @@ function resolveMeetingDate(rule, startDate, endDate, programYear, opts = {}) {
   if (place.mode === 'weekday' && place.weekday != null) {
     date = snapToWeekday(date, place.weekday, place.snap || 'forward');
 
-    // Optional holiday / closed-day avoidance (Phase 5).
+    // Optional holiday / closed-day avoidance (Phase 5): keep the same weekday,
+    // jump a week in the snap direction until the day is open.
     if (typeof opts.isClosed === 'function') {
       const step = (place.snap === 'backward' || place.snap === 'onOrBefore') ? -7 : 7;
       let guard = 0;
       while (opts.isClosed(date) && guard < 52) {
-        date.setDate(date.getDate() + step); // keep the same weekday, jump a week
+        date.setDate(date.getDate() + step);
         guard++;
       }
     }
+  } else if (typeof opts.isClosed === 'function' && opts.isClosed(date)) {
+    // Exact-placement meeting (e.g. Program Start) that lands on a closed day:
+    // move forward to the next open weekday (skip red/closed days and weekends).
+    let guard = 0;
+    do {
+      date.setDate(date.getDate() + 1);
+      guard++;
+    } while ((opts.isClosed(date) || date.getDay() === 0 || date.getDay() === 6) && guard < 31);
   }
 
   return date;

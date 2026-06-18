@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
 import { resolveMeetingDate } from '../utils/meetingRuleEngine';
+import { createIsClosed } from '../utils/swedishHolidays';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
@@ -141,6 +142,34 @@ const MeetingAgent = () => {
 
     loadFromBackend();
   }, [initialLoadComplete]); // Only run on mount
+
+  // If this browser has no locally-remembered review id, fall back to the
+  // server's "active review" pointer. Without this, the admin view only shows
+  // director approvals on the ONE device where "Share for Director Review" was
+  // clicked (the id lived solely in that browser's localStorage). Now any admin
+  // device converges on the same review. Persisting it locally also means a later
+  // "Share" from this device updates the same review instead of forking a new one.
+  // Runs once on mount; if localStorage already has an id, we keep that override.
+  useEffect(() => {
+    if (currentReviewId) return; // already known locally — nothing to do
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/reviews/active`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.activeReviewId) {
+          setCurrentReviewId(data.activeReviewId);
+          localStorage.setItem('iml-current-review-id', data.activeReviewId);
+          console.log('[ACTIVE-REVIEW] Adopted server active review:', data.activeReviewId);
+        }
+      } catch (error) {
+        console.error('[ACTIVE-REVIEW] Failed to load active review id from server:', error);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-refresh director approvals on page load and every 30 seconds
   useEffect(() => {
@@ -607,6 +636,8 @@ const MeetingAgent = () => {
     const generatedMeetings = [];
     let meetingId = 1;
     const summerConferenceMeetings = new Map(); // Track shared summer conference meetings
+    // Skip Swedish red days + admin-maintained IML-closed days when placing meetings.
+    const isClosed = createIsClosed(appConfig.imlClosedDays || []);
 
     // Build lookup of previous year's times (cyclical by program TYPE + meeting TYPE)
     // Key: "{programType}|{meetingTypeName}|{year}" -> time
@@ -652,12 +683,14 @@ const MeetingAgent = () => {
             : `${program.type}_${program.id || program.startDate.toISOString()}_${meetingType.id || meetingType.name}`;
 
           if (!summerConferenceMeetings.has(meetingKey)) {
-            // Resolve date from the configured rule (anchor + offset + placement).
+            // Resolve date from the configured rule (anchor + offset + placement),
+            // skipping Swedish red days / IML-closed days.
             let meetingDate = resolveMeetingDate(
               meetingType,
               program.startDate,
               program.endDate,
-              program.startDate.getFullYear()
+              program.startDate.getFullYear(),
+              { isClosed }
             );
 
             if (meetingDate) {
@@ -709,7 +742,7 @@ const MeetingAgent = () => {
 
           let weekCount = 0;
           while (currentDate <= program.endDate && weekCount < maxWeeks) {
-            if (currentDate.getDay() === meetingType.placement.weekday) {
+            if (currentDate.getDay() === meetingType.placement.weekday && !isClosed(currentDate)) {
               const inheritedTime = getInheritedTime(
                 program.type,
                 meetingType.name,
@@ -737,12 +770,13 @@ const MeetingAgent = () => {
             currentDate.setDate(currentDate.getDate() + 1);
           }
         } else if (!meetingType.recurring) {
-          // Resolve meeting date from the configured rule.
+          // Resolve meeting date from the configured rule (skip red/closed days).
           let meetingDate = resolveMeetingDate(
             meetingType,
             program.startDate,
             program.endDate,
-            program.startDate.getFullYear()
+            program.startDate.getFullYear(),
+            { isClosed }
           );
 
           if (meetingDate) {

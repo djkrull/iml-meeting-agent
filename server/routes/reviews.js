@@ -32,6 +32,15 @@ router.post('/', async (req, res) => {
 
     console.log('Review created successfully:', reviewId);
 
+    // Remember this as the server-side "active review" so other admin devices can
+    // show its approvals without having clicked "Share" themselves. Best-effort:
+    // a failure here must not make a successfully-created review look failed.
+    try {
+      await dbHelpers.setActiveReviewId(reviewId);
+    } catch (e) {
+      console.error('Failed to set active review id (non-fatal):', e.message);
+    }
+
     res.status(201).json({
       success: true,
       reviewId,
@@ -63,6 +72,14 @@ router.put('/:id', async (req, res) => {
 
     console.log(`[UPDATE REVIEW] Review ${reviewId} updated successfully`);
 
+    // Keep the server-side "active review" pointing at the one just updated, so
+    // every admin device converges on it. Best-effort (see POST handler).
+    try {
+      await dbHelpers.setActiveReviewId(reviewId);
+    } catch (e) {
+      console.error('Failed to set active review id (non-fatal):', e.message);
+    }
+
     res.json({
       success: true,
       reviewId,
@@ -73,6 +90,20 @@ router.put('/:id', async (req, res) => {
     console.error('[UPDATE REVIEW] Error:', error);
     console.error('[UPDATE REVIEW] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to update review', details: error.message });
+  }
+});
+
+// Get the server-remembered "active" review id (the latest review shared for
+// director review). Lets any admin device show director approvals even if it
+// never clicked "Share" itself — the id otherwise lived only in that browser's
+// localStorage. MUST be declared before GET /:id, or "active" matches :id.
+router.get('/active', async (req, res) => {
+  try {
+    const activeReviewId = await dbHelpers.getActiveReviewId();
+    res.json({ activeReviewId });
+  } catch (error) {
+    console.error('Error getting active review id:', error);
+    res.status(500).json({ error: 'Failed to get active review id' });
   }
 });
 

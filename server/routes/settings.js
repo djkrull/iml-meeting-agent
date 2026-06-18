@@ -71,6 +71,10 @@ router.put('/', async (req, res) => {
       : current.settingsPin;
     const merged = { ...current, ...config, settingsPin: newPin };
     delete merged.hasPin; // not a real config field
+    // activeReviewId is owned by the reviews flow, not the Settings editor. The
+    // editor round-trips the whole config, so force the server's current value to
+    // stop a stale editor from clobbering / resurrecting an old active review.
+    merged.activeReviewId = current.activeReviewId;
 
     if (!Array.isArray(merged.directors) || !Array.isArray(merged.admins) ||
         !merged.meetingRules || typeof merged.meetingRules !== 'object') {

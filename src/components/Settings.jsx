@@ -172,10 +172,46 @@ const Settings = ({ onClose }) => {
           {!config && !loadError && <p className="text-gray-600">Laddar…</p>}
 
           {config && activeTab === 'rules' && (
-            <MeetingRulesEditor
-              rules={config.meetingRules || {}}
-              onChange={(newRules) => setConfig(prev => ({ ...prev, meetingRules: newRules }))}
-            />
+            <>
+              {/* IML-closed days (Swedish red days are handled automatically) */}
+              <div className="mb-6 border border-amber-200 rounded-lg p-4 bg-amber-50">
+                <h3 className="font-bold text-gray-800 mb-1">IML-stängda dagar</h3>
+                <p className="text-sm text-gray-500 mb-3">
+                  Extra dagar då inga möten ska läggas, utöver svenska röda dagar (som hanteras automatiskt). Schemalagda möten som hamnar på en stängd dag flyttas till närmaste öppna veckodag; veckomöten den veckan hoppas över.
+                </p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {(config.imlClosedDays || []).map((day, idx) => (
+                    <div key={idx} className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg px-2 py-1">
+                      <input
+                        type="date"
+                        value={day || ''}
+                        onChange={(e) => setConfig(prev => ({ ...prev, imlClosedDays: prev.imlClosedDays.map((d, i) => i === idx ? e.target.value : d) }))}
+                        className="text-sm focus:outline-none"
+                      />
+                      <button
+                        onClick={() => setConfig(prev => ({ ...prev, imlClosedDays: prev.imlClosedDays.filter((_, i) => i !== idx) }))}
+                        className="text-red-500 hover:text-red-700"
+                        title="Ta bort"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {(config.imlClosedDays || []).length === 0 && <span className="text-sm text-gray-400">Inga extra stängda dagar.</span>}
+                </div>
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, imlClosedDays: [...(prev.imlClosedDays || []), ''] }))}
+                  className="inline-flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-3 py-1.5 rounded-lg font-semibold transition text-sm"
+                >
+                  <Plus className="w-4 h-4" /> Lägg till dag
+                </button>
+              </div>
+
+              <MeetingRulesEditor
+                rules={config.meetingRules || {}}
+                onChange={(newRules) => setConfig(prev => ({ ...prev, meetingRules: newRules }))}
+              />
+            </>
           )}
 
           {config && activeTab === 'directors' && (
