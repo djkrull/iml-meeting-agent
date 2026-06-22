@@ -11,10 +11,14 @@
 
 # Misc
 .DS_Store
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Phase secrets manager (local project config — points at the secrets store)
+.phase.json
 
 npm-debug.log*
 yarn-debug.log*

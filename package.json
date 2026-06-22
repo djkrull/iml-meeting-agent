@@ -18,7 +18,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "server": "node server/index.js",
+    "server": "phase run --path \"/imlmeeting\" \"node server/index.js\"",
     "dev": "concurrently \"npm run server\" \"npm start\"",
     "build": "react-scripts build",
     "test": "react-scripts test",
