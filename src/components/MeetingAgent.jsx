@@ -234,18 +234,21 @@ const MeetingAgent = () => {
             const adminApprovals = allApprovals.filter(a => a.role === 'admin');
 
             // No approval-relevant change → keep the same object reference.
+            // (reviewMeetingId is included so the per-review row id always
+            // propagates — the inline admin-attendance control needs it.)
             if (
               meeting.approvedCount === approvedCount &&
               meeting.rejectedCount === rejectedCount &&
               meeting.approved === approved &&
               (meeting.approvals?.length || 0) === approvals.length &&
-              (meeting.adminApprovals?.length || 0) === adminApprovals.length
+              (meeting.adminApprovals?.length || 0) === adminApprovals.length &&
+              meeting.reviewMeetingId === dbMeeting.id
             ) {
               return meeting;
             }
 
             changed = true;
-            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved };
+            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved, reviewMeetingId: dbMeeting.id };
           });
 
           // Nothing changed → return the SAME array so no re-render / no auto-save.
@@ -1209,7 +1212,8 @@ const MeetingAgent = () => {
               rejectedCount,
               approvals: allApprovals.filter(a => a.role !== 'admin'),
               adminApprovals: allApprovals.filter(a => a.role === 'admin'),
-              approved: approvedCount > 0 && rejectedCount === 0
+              approved: approvedCount > 0 && rejectedCount === 0,
+              reviewMeetingId: dbMeeting.id
             };
           }
           return meeting;
@@ -1220,6 +1224,49 @@ const MeetingAgent = () => {
     } catch (error) {
       console.error('Error refreshing attendance:', error);
       alert('Failed to refresh attendance. Make sure the server is running.');
+    }
+  };
+
+  // Record the CURRENT admin's own attendance for a meeting directly from the
+  // dashboard (role='admin', so it never counts toward the director badge).
+  // Attendance lives on the per-review meeting row, so this needs an active
+  // review and the meeting's reviewMeetingId (set during the approval merge).
+  // status: 'accepted' | 'declined' | 'clear'.
+  const recordAdminAttendance = async (meeting, status) => {
+    if (!currentReviewId || !meeting.reviewMeetingId || !adminIdentity) return;
+    try {
+      const base = `${API_URL}/api/reviews/${currentReviewId}/meetings/${meeting.reviewMeetingId}`;
+      if (status === 'clear') {
+        await fetch(`${base}/clear-approval`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ directorName: adminIdentity.name, attendeeId: adminIdentity.id })
+        });
+      } else {
+        await fetch(`${base}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            directorName: adminIdentity.name,
+            status,
+            role: 'admin',
+            attendeeId: adminIdentity.id
+          })
+        });
+      }
+
+      // Re-sync this meeting's admin attendance from the server (exact match by
+      // the per-review row id). Director fields are untouched by admin responses.
+      const res = await fetch(`${API_URL}/api/reviews/${currentReviewId}`);
+      if (res.ok) {
+        const review = await res.json();
+        const db = review.meetings?.find(m => m.id === meeting.reviewMeetingId);
+        const adminApprovals = (db?.approvals || []).filter(a => a.role === 'admin');
+        setMeetings(prev => prev.map(m => m.id === meeting.id ? { ...m, adminApprovals } : m));
+      }
+    } catch (error) {
+      console.error('Failed to record admin attendance:', error);
+      alert('Kunde inte spara närvaro. Försök igen.');
     }
   };
 
@@ -1568,7 +1615,7 @@ const MeetingAgent = () => {
         setMeetings(currentMeetings =>
           currentMeetings.map(m =>
             m.id === meeting.id
-              ? { ...m, approvals: [], approvedCount: 0, rejectedCount: 0 }
+              ? { ...m, approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 }
               : m
           )
         );
@@ -2940,6 +2987,51 @@ const MeetingAgent = () => {
                             ))}
                           </div>
                         )}
+
+                        {/* Inline control: the CURRENT admin records their own attendance.
+                            Only shown when there's an active per-review row to attach it to. */}
+                        {currentReviewId && meeting.reviewMeetingId && adminIdentity && (() => {
+                          const mine = meeting.adminApprovals?.find(a => a.attendee_id === adminIdentity.id);
+                          const isAttending = mine && (mine.status === 'accepted' || mine.status === 'approved');
+                          const isDeclined = mine && (mine.status === 'declined' || mine.status === 'rejected');
+                          return (
+                            <div className="bg-purple-50 border border-purple-200 p-3 rounded-lg mt-2">
+                              <p className="text-xs font-semibold text-purple-800 mb-2">
+                                Din närvaro ({adminIdentity.name}):
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => recordAdminAttendance(meeting, 'accepted')}
+                                  className={`text-xs px-3 py-1 rounded-full transition ${
+                                    isAttending
+                                      ? 'bg-green-600 text-white'
+                                      : 'bg-white text-purple-800 border border-purple-300 hover:bg-purple-100'
+                                  }`}
+                                >
+                                  Attending
+                                </button>
+                                <button
+                                  onClick={() => recordAdminAttendance(meeting, 'declined')}
+                                  className={`text-xs px-3 py-1 rounded-full transition ${
+                                    isDeclined
+                                      ? 'bg-red-600 text-white'
+                                      : 'bg-white text-purple-800 border border-purple-300 hover:bg-purple-100'
+                                  }`}
+                                >
+                                  Cannot attend
+                                </button>
+                                {mine && (
+                                  <button
+                                    onClick={() => recordAdminAttendance(meeting, 'clear')}
+                                    className="text-xs px-3 py-1 rounded-full bg-white text-gray-600 border border-gray-300 hover:bg-gray-100 transition"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <div className="flex flex-col gap-2 ml-4">
