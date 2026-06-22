@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 
 // Railway PostgreSQL connection
-const DATABASE_URL = 'postgresql://postgres:qRPQZGbRtCuyHtEMgKCXhcBTpMapaLqS@yamanote.proxy.rlwy.net:22802/railway';
+const DATABASE_URL = process.env.DATABASE_PUBLIC_URL;
 
 async function checkProduction() {
   const pool = new Pool({

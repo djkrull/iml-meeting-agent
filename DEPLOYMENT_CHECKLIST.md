@@ -8,7 +8,7 @@ Your backend is deployed on Railway and uses PostgreSQL for shared data storage.
 
 Railway should **automatically** set these when you add a PostgreSQL database:
 - ✅ `DATABASE_URL` (auto-generated when you add PostgreSQL database service)
-- ✅ `DATABASE_PUBLIC_URL` - Your value: `postgresql://postgres:qRPQZGbRtCuyHtEMgKCXhcBTpMapaLqS@yamanote.proxy.rlwy.net:22802/railway`
+- ✅ `DATABASE_PUBLIC_URL` - Your value: `postgresql://postgres:<DB_PASSWORD>@yamanote.proxy.rlwy.net:22802/railway`
 
 **Action Required:** Verify in Railway dashboard:
 1. Go to Railway Dashboard → Your Backend Service → Variables

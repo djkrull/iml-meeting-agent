@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 const { dbHelpers } = require('./db');
 
-const DATABASE_URL = 'postgresql://postgres:qRPQZGbRtCuyHtEMgKCXhcBTpMapaLqS@yamanote.proxy.rlwy.net:22802/railway';
+const DATABASE_URL = process.env.DATABASE_PUBLIC_URL;
 
 async function testUpdateReview() {
   const reviewId = 'e58c119e-b6dd-41f9-93bd-30251752220e';

@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 const fs = require('fs');
 
-const DATABASE_URL = 'postgresql://postgres:qRPQZGbRtCuyHtEMgKCXhcBTpMapaLqS@yamanote.proxy.rlwy.net:22802/railway';
+const DATABASE_URL = process.env.DATABASE_PUBLIC_URL;
 const CSV_PATH = 'C:\\Users\\chrwah28.KVA\\Downloads\\Verksamhetsplanering 2026-2029.csv';
 
 const MONTHS = {

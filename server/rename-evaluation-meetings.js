@@ -1,6 +1,6 @@
 const { Pool } = require('pg');
 
-const DATABASE_URL = 'postgresql://postgres:qRPQZGbRtCuyHtEMgKCXhcBTpMapaLqS@yamanote.proxy.rlwy.net:22802/railway';
+const DATABASE_URL = process.env.DATABASE_PUBLIC_URL;
 
 async function renameEvaluationMeetings() {
   const pool = new Pool({
