@@ -216,16 +216,20 @@ const MeetingAgent = () => {
 
             if (!dbMeeting) return meeting;
 
+            // Only director responses gate approval; admin responses are attendance.
             const approvedCount = dbMeeting.approvals?.filter(a =>
-              a.status === 'approved' || a.status === 'accepted'
+              (a.status === 'approved' || a.status === 'accepted') && a.role !== 'admin'
             ).length || 0;
 
             const rejectedCount = dbMeeting.approvals?.filter(a =>
-              a.status === 'rejected' || a.status === 'declined'
+              (a.status === 'rejected' || a.status === 'declined') && a.role !== 'admin'
             ).length || 0;
 
             const approved = approvedCount > 0 && rejectedCount === 0;
-            const approvals = dbMeeting.approvals || [];
+            // Dashboard shows director responses only; admin attendance is managed
+            // in the reviewer view, so keep admin rows out of meeting.approvals to
+            // avoid inflating director-response badges/warnings.
+            const approvals = (dbMeeting.approvals || []).filter(a => a.role !== 'admin');
 
             // No approval-relevant change → keep the same object reference.
             if (
@@ -1185,20 +1189,21 @@ const MeetingAgent = () => {
 
           if (dbMeeting) {
             const approvedCount = dbMeeting.approvals?.filter(a =>
-              a.status === 'approved' || a.status === 'accepted'
+              (a.status === 'approved' || a.status === 'accepted') && a.role !== 'admin'
             ).length || 0;
             const rejectedCount = dbMeeting.approvals?.filter(a =>
-              a.status === 'rejected' || a.status === 'declined'
+              (a.status === 'rejected' || a.status === 'declined') && a.role !== 'admin'
             ).length || 0;
 
             console.log(`[REFRESH] Matched "${meeting.type}" - ${approvedCount} approved, ${rejectedCount} rejected`);
 
-            // Update meeting with approval info
+            // Update meeting with approval info (director responses only on the
+            // dashboard; admin attendance is shown in the reviewer view).
             return {
               ...meeting,
               approvedCount,
               rejectedCount,
-              approvals: dbMeeting.approvals || [],
+              approvals: (dbMeeting.approvals || []).filter(a => a.role !== 'admin'),
               approved: approvedCount > 0 && rejectedCount === 0
             };
           }

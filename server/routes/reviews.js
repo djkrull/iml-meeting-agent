@@ -115,11 +115,13 @@ router.get('/:id', async (req, res) => {
 
     // Calculate approval status for each meeting
     const meetingsWithStatus = review.meetings.map(meeting => {
+      // Director approval drives meeting status — admin responses are attendance
+      // only and must NOT count toward approved/rejected.
       const approvedCount = meeting.approvals.filter(a =>
-        a.status === 'approved' || a.status === 'accepted'
+        (a.status === 'approved' || a.status === 'accepted') && a.role !== 'admin'
       ).length;
       const rejectedCount = meeting.approvals.filter(a =>
-        a.status === 'rejected' || a.status === 'declined'
+        (a.status === 'rejected' || a.status === 'declined') && a.role !== 'admin'
       ).length;
 
       let overallStatus = 'pending';
@@ -237,7 +239,7 @@ router.post('/:id/sync-meeting', async (req, res) => {
 router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const { directorName, status, comment, suggestedDate, suggestedTime } = req.body;
+    const { directorName, status, comment, suggestedDate, suggestedTime, role, attendeeId } = req.body;
 
     if (!directorName) {
       return res.status(400).json({ error: 'Director name is required' });
@@ -253,7 +255,9 @@ router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
       status,
       comment || null,
       suggestedDate || null,
-      suggestedTime || null
+      suggestedTime || null,
+      role || 'director',
+      attendeeId || null
     );
 
     // Get updated review
@@ -275,13 +279,13 @@ router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
 router.post('/:id/meetings/:meetingId/clear-approval', async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const { directorName } = req.body;
+    const { directorName, attendeeId } = req.body;
 
-    if (!directorName) {
-      return res.status(400).json({ error: 'Director name is required' });
+    if (!directorName && !attendeeId) {
+      return res.status(400).json({ error: 'Director name or attendee id is required' });
     }
 
-    await dbHelpers.clearApproval(meetingId, directorName);
+    await dbHelpers.clearApproval(meetingId, directorName, attendeeId || null);
 
     // Get updated review
     const { id } = req.params;
@@ -349,11 +353,13 @@ router.get('/:id/status', async (req, res) => {
     };
 
     review.meetings.forEach(meeting => {
+      // Director approval drives meeting status — admin responses are attendance
+      // only and must NOT count toward approved/rejected.
       const approvedCount = meeting.approvals.filter(a =>
-        a.status === 'approved' || a.status === 'accepted'
+        (a.status === 'approved' || a.status === 'accepted') && a.role !== 'admin'
       ).length;
       const rejectedCount = meeting.approvals.filter(a =>
-        a.status === 'rejected' || a.status === 'declined'
+        (a.status === 'rejected' || a.status === 'declined') && a.role !== 'admin'
       ).length;
 
       if (rejectedCount > 0) {

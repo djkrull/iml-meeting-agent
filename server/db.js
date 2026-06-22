@@ -132,6 +132,8 @@ async function initializePostgresDatabase() {
         suggested_date TEXT,
         suggested_time TEXT,
         timestamp TIMESTAMP NOT NULL,
+        role TEXT DEFAULT 'director',
+        attendee_id TEXT,
         FOREIGN KEY (meeting_id) REFERENCES meetings(id)
       )
     `);
@@ -186,6 +188,18 @@ async function initializePostgresDatabase() {
       console.log('PostgreSQL schema migration completed');
     } catch (migrationError) {
       console.log('Migration note:', migrationError.message);
+    }
+
+    // Migration: approvals gains a reviewer role + stable attendee id.
+    try {
+      await pool.query(`
+        ALTER TABLE approvals
+        ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'director',
+        ADD COLUMN IF NOT EXISTS attendee_id TEXT
+      `);
+      console.log('approvals role/attendee_id migration completed');
+    } catch (migrationError) {
+      console.log('Migration note (approvals):', migrationError.message);
     }
 
     // Migration: Change program_id from INTEGER to TEXT in existing table
@@ -270,9 +284,14 @@ function initializeSQLiteDatabase() {
         suggested_date TEXT,
         suggested_time TEXT,
         timestamp TEXT NOT NULL,
+        role TEXT DEFAULT 'director',
+        attendee_id TEXT,
         FOREIGN KEY (meeting_id) REFERENCES meetings(id)
       )
     `);
+    // Best-effort migration for existing local DBs (ignore "duplicate column").
+    db.run(`ALTER TABLE approvals ADD COLUMN role TEXT DEFAULT 'director'`, () => {});
+    db.run(`ALTER TABLE approvals ADD COLUMN attendee_id TEXT`, () => {});
 
     // Tables for persistent program and meeting storage
     db.run(`
@@ -761,89 +780,98 @@ const dbHelpers = {
   },
 
   // Add or update approval
-  addApproval: (meetingId, directorName, status, comment, suggestedDate, suggestedTime) => {
+  addApproval: (meetingId, directorName, status, comment, suggestedDate, suggestedTime, role, attendeeId) => {
     return new Promise(async (resolve, reject) => {
       const timestamp = new Date().toISOString();
+      const role0 = role || 'director';
+      // Match an existing response by the stable attendee id when available
+      // (rename-safe); fall back to the display name for legacy rows.
+      const byId = attendeeId != null && attendeeId !== '';
+      const aid = byId ? attendeeId : null;
 
-      if (USE_POSTGRES) {
-        try {
-          const existing = await pool.query(
-            'SELECT id FROM approvals WHERE meeting_id = $1 AND director_name = $2',
-            [meetingId, directorName]
-          );
-
-          if (existing.rows.length > 0) {
+      try {
+        if (USE_POSTGRES) {
+          // Look up an existing response by stable id first (rename-safe), then
+          // fall back to display name so PRE-MIGRATION rows (attendee_id NULL) are
+          // updated + backfilled instead of duplicated.
+          let existingId = null;
+          if (byId) {
+            const r = await pool.query('SELECT id FROM approvals WHERE meeting_id = $1 AND attendee_id = $2', [meetingId, attendeeId]);
+            if (r.rows.length > 0) existingId = r.rows[0].id;
+          }
+          if (existingId == null) {
+            const r = await pool.query('SELECT id FROM approvals WHERE meeting_id = $1 AND director_name = $2', [meetingId, directorName]);
+            if (r.rows.length > 0) existingId = r.rows[0].id;
+          }
+          if (existingId != null) {
             await pool.query(
-              `UPDATE approvals SET status = $1, comment = $2, suggested_date = $3, suggested_time = $4, timestamp = $5 WHERE id = $6`,
-              [status, comment, suggestedDate, suggestedTime, timestamp, existing.rows[0].id]
+              `UPDATE approvals SET status = $1, comment = $2, suggested_date = $3, suggested_time = $4, timestamp = $5, director_name = $6, role = $7, attendee_id = COALESCE($8, attendee_id) WHERE id = $9`,
+              [status, comment, suggestedDate, suggestedTime, timestamp, directorName, role0, aid, existingId]
             );
-            resolve({ id: existing.rows[0].id, updated: true });
+            resolve({ id: existingId, updated: true });
           } else {
             const result = await pool.query(
-              `INSERT INTO approvals (meeting_id, director_name, status, comment, suggested_date, suggested_time, timestamp)
-               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-              [meetingId, directorName, status, comment, suggestedDate, suggestedTime, timestamp]
+              `INSERT INTO approvals (meeting_id, director_name, status, comment, suggested_date, suggested_time, timestamp, role, attendee_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+              [meetingId, directorName, status, comment, suggestedDate, suggestedTime, timestamp, role0, aid]
             );
             resolve({ id: result.rows[0].id, updated: false });
           }
-        } catch (err) {
-          reject(err);
-        }
-      } else {
-        db.get(
-          'SELECT id FROM approvals WHERE meeting_id = ? AND director_name = ?',
-          [meetingId, directorName],
-          (err, existing) => {
-            if (err) {
-              reject(err);
-            } else if (existing) {
-              db.run(
-                `UPDATE approvals SET status = ?, comment = ?, suggested_date = ?, suggested_time = ?, timestamp = ? WHERE id = ?`,
-                [status, comment, suggestedDate, suggestedTime, timestamp, existing.id],
-                function(err) {
-                  if (err) reject(err);
-                  else resolve({ id: existing.id, updated: true });
-                }
-              );
-            } else {
-              db.run(
-                `INSERT INTO approvals (meeting_id, director_name, status, comment, suggested_date, suggested_time, timestamp)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [meetingId, directorName, status, comment, suggestedDate, suggestedTime, timestamp],
-                function(err) {
-                  if (err) reject(err);
-                  else resolve({ id: this.lastID, updated: false });
-                }
-              );
-            }
+        } else {
+          const getOne = (sql, params) => new Promise((res, rej) => db.get(sql, params, (e, row) => e ? rej(e) : res(row)));
+          const run = (sql, params) => new Promise((res, rej) => db.run(sql, params, function (e) { e ? rej(e) : res(this); }));
+          let existing = null;
+          if (byId) existing = await getOne('SELECT id, attendee_id FROM approvals WHERE meeting_id = ? AND attendee_id = ?', [meetingId, attendeeId]);
+          if (!existing) existing = await getOne('SELECT id, attendee_id FROM approvals WHERE meeting_id = ? AND director_name = ?', [meetingId, directorName]);
+          if (existing) {
+            await run(
+              `UPDATE approvals SET status = ?, comment = ?, suggested_date = ?, suggested_time = ?, timestamp = ?, director_name = ?, role = ?, attendee_id = ? WHERE id = ?`,
+              [status, comment, suggestedDate, suggestedTime, timestamp, directorName, role0, (aid != null ? aid : existing.attendee_id || null), existing.id]
+            );
+            resolve({ id: existing.id, updated: true });
+          } else {
+            const r = await run(
+              `INSERT INTO approvals (meeting_id, director_name, status, comment, suggested_date, suggested_time, timestamp, role, attendee_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [meetingId, directorName, status, comment, suggestedDate, suggestedTime, timestamp, role0, aid]
+            );
+            resolve({ id: r.lastID, updated: false });
           }
-        );
+        }
+      } catch (err) {
+        reject(err);
       }
     });
   },
 
-  // Clear/delete a director's approval for a specific meeting
-  clearApproval: (meetingId, directorName) => {
+  // Clear/delete a reviewer's approval for a specific meeting. Matches by the
+  // stable attendee id when provided (rename-safe), else by display name.
+  clearApproval: (meetingId, directorName, attendeeId) => {
     return new Promise(async (resolve, reject) => {
+      const byId = attendeeId != null && attendeeId !== '';
       if (USE_POSTGRES) {
         try {
           const result = await pool.query(
-            'DELETE FROM approvals WHERE meeting_id = $1 AND director_name = $2',
-            [meetingId, directorName]
+            byId
+              ? 'DELETE FROM approvals WHERE meeting_id = $1 AND attendee_id = $2'
+              : 'DELETE FROM approvals WHERE meeting_id = $1 AND director_name = $2',
+            [meetingId, byId ? attendeeId : directorName]
           );
-          console.log(`[DB] Cleared approval for director "${directorName}" on meeting ${meetingId}`);
+          console.log(`[DB] Cleared approval (${byId ? 'id ' + attendeeId : 'name ' + directorName}) on meeting ${meetingId}`);
           resolve({ deleted: result.rowCount });
         } catch (err) {
           reject(err);
         }
       } else {
         db.run(
-          'DELETE FROM approvals WHERE meeting_id = ? AND director_name = ?',
-          [meetingId, directorName],
+          byId
+            ? 'DELETE FROM approvals WHERE meeting_id = ? AND attendee_id = ?'
+            : 'DELETE FROM approvals WHERE meeting_id = ? AND director_name = ?',
+          [meetingId, byId ? attendeeId : directorName],
           function(err) {
             if (err) reject(err);
             else {
-              console.log(`[DB] Cleared approval for director "${directorName}" on meeting ${meetingId}`);
+              console.log(`[DB] Cleared approval (${byId ? 'id ' + attendeeId : 'name ' + directorName}) on meeting ${meetingId}`);
               resolve({ deleted: this.changes });
             }
           }

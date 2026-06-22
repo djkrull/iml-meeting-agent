@@ -9,44 +9,53 @@ const DirectorReviewView = ({ reviewId }) => {
   const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [directorName, setDirectorName] = useState('');
-  const [directorPerson, setDirectorPerson] = useState(null); // { id, name, role }
-  const [directors, setDirectors] = useState([]);
+  const [directorPerson, setDirectorPerson] = useState(null); // { id, name, role, kind }
+  const [reviewers, setReviewers] = useState([]); // directors + admins, role-tagged
   const [identityConfigState, setIdentityConfigState] = useState('loading'); // 'loading' | 'ready' | 'error'
   const [showNamePrompt, setShowNamePrompt] = useState(true);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [editedDescription, setEditedDescription] = useState('');
   const [changingDecisionId, setChangingDecisionId] = useState(null);
 
-  // Load the director roster from settings, then resolve any remembered identity.
-  const loadDirectors = useCallback(async () => {
+  // Display name for a reviewer: directors keep "Name, Role" (matches legacy
+  // approval rows); admins are just their name.
+  const reviewerDisplayName = (p) => p && p.kind === 'admin' ? p.name : `${p.name}, ${p.role}`;
+
+  // Load directors + admins from settings as one reviewer roster, then resolve
+  // any remembered identity.
+  const loadReviewers = useCallback(async () => {
     setIdentityConfigState('loading');
     try {
       const res = await fetch(`${API_URL}/api/settings`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const list = (data.config?.directors || []).filter(d => d.active !== false);
-      setDirectors(list);
+      const dirs = (data.config?.directors || []).filter(d => d.active !== false)
+        .map(d => ({ id: d.id, name: d.name, role: d.role, kind: 'director' }));
+      const adms = (data.config?.admins || []).filter(a => a.active !== false)
+        .map(a => ({ id: a.id, name: a.name, role: 'Administratör', kind: 'admin' }));
+      const list = [...dirs, ...adms];
+      setReviewers(list);
       const storedId = readStoredIdentityId(DIRECTOR_IDENTITY_KEY);
-      const remembered = storedId ? list.find(d => d.id === storedId) : null;
+      const remembered = storedId ? list.find(p => p.id === storedId) : null;
       if (remembered) {
         setDirectorPerson(remembered);
-        setDirectorName(`${remembered.name}, ${remembered.role}`);
+        setDirectorName(reviewerDisplayName(remembered));
         setShowNamePrompt(false);
       }
       setIdentityConfigState('ready');
     } catch (err) {
-      console.error('Failed to load directors:', err);
+      console.error('Failed to load reviewers:', err);
       setIdentityConfigState('error');
     }
   }, []);
 
-  useEffect(() => { loadDirectors(); }, [loadDirectors]);
+  useEffect(() => { loadReviewers(); }, [loadReviewers]);
 
-  const pickDirector = (person, remember) => {
+  const pickReviewer = (person, remember) => {
     if (remember) storeIdentityId(DIRECTOR_IDENTITY_KEY, person.id);
     else clearStoredIdentity(DIRECTOR_IDENTITY_KEY);
     setDirectorPerson(person);
-    setDirectorName(`${person.name}, ${person.role}`);
+    setDirectorName(reviewerDisplayName(person));
     setShowNamePrompt(false);
   };
 
@@ -96,7 +105,9 @@ const DirectorReviewView = ({ reviewId }) => {
           status,
           comment,
           suggestedDate,
-          suggestedTime
+          suggestedTime,
+          role: directorPerson?.kind === 'admin' ? 'admin' : 'director',
+          attendeeId: directorPerson?.id || null
         })
       });
       // Clear changing decision state
@@ -118,7 +129,7 @@ const DirectorReviewView = ({ reviewId }) => {
       await fetch(`${API_URL}/api/reviews/${reviewId}/meetings/${meetingId}/clear-approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ directorName })
+        body: JSON.stringify({ directorName, attendeeId: directorPerson?.id || null })
       });
       // Clear changing decision state
       setChangingDecisionId(null);
@@ -239,13 +250,19 @@ const DirectorReviewView = ({ reviewId }) => {
         ? meeting.participants.join(', ')
         : (typeof meeting.participants === 'string' ? JSON.parse(meeting.participants).join(', ') : '');
 
+      // Reviewers (directors + admins) who marked themselves attending.
+      const attending = (meeting.approvals || [])
+        .filter(a => a.status === 'accepted' || a.status === 'approved')
+        .map(a => a.director_name);
+      const attendingStr = attending.length ? `\\n\\nAttending: ${attending.join(', ')}` : '';
+
       icsContent.push('BEGIN:VEVENT');
       icsContent.push(`UID:iml-meeting-${meeting.id}-${Date.now()}@institutmittagleffler.se`);
       icsContent.push(`DTSTAMP:${timestamp}`);
       icsContent.push(`DTSTART:${startDateTime}`);
       icsContent.push(`DTEND:${endDateTime}`);
       icsContent.push(`SUMMARY:Prl: ${meeting.type} - ${programTypeWithYear}`);
-      icsContent.push(`DESCRIPTION:${meeting.description || ''}\\n\\nParticipants: ${participantsStr}\\n\\nProgram: ${meeting.program_name}`);
+      icsContent.push(`DESCRIPTION:${meeting.description || ''}\\n\\nParticipants: ${participantsStr}${attendingStr}\\n\\nProgram: ${meeting.program_name}`);
       icsContent.push(`LOCATION:Institut Mittag-Leffler`);
       icsContent.push(`CATEGORIES:${meeting.program_type}`);
       icsContent.push(`STATUS:TENTATIVE`);
@@ -277,8 +294,11 @@ const DirectorReviewView = ({ reviewId }) => {
   };
 
   const getMyApproval = (meeting) => {
-    // First try exact match
-    let approval = meeting.approvals?.find(a => a.director_name === directorName);
+    // Prefer the stable attendee id (rename-safe), then exact name, then fuzzy.
+    let approval = directorPerson?.id
+      ? meeting.approvals?.find(a => a.attendee_id && a.attendee_id === directorPerson.id)
+      : null;
+    if (!approval) approval = meeting.approvals?.find(a => a.director_name === directorName);
 
     // If no exact match, try flexible matching (check if core name is included)
     if (!approval && directorName) {
@@ -336,15 +356,15 @@ const DirectorReviewView = ({ reviewId }) => {
   if (showNamePrompt) {
     return (
       <IdentityPicker
-        title="Director Review Access"
-        subtitle="Please select your name to access the meeting review:"
-        people={directors}
-        onPick={pickDirector}
+        title="Meeting Review Access"
+        subtitle="Välj ditt namn för att se och svara på mötena:"
+        people={reviewers}
+        onPick={pickReviewer}
         loading={identityConfigState === 'loading'}
         error={identityConfigState === 'error'
-          ? 'Could not load the director list. Please check your connection and try again.'
+          ? 'Kunde inte ladda namnlistan. Kontrollera anslutningen och försök igen.'
           : null}
-        onRetry={loadDirectors}
+        onRetry={loadReviewers}
       />
     );
   }
@@ -534,10 +554,10 @@ const DirectorReviewView = ({ reviewId }) => {
                       )}
                     </div>
 
-                    {/* Other Directors' Responses */}
+                    {/* Other reviewers' responses (directors + admins) */}
                     {otherApprovals.length > 0 && (
                       <div className="bg-blue-50 p-3 rounded-lg mb-3">
-                        <p className="text-sm font-semibold text-blue-800 mb-2">Other Director's Response:</p>
+                        <p className="text-sm font-semibold text-blue-800 mb-2">Andras svar:</p>
                         {otherApprovals.map((approval, idx) => (
                           <div key={idx} className="flex items-center gap-2 text-sm">
                             {(approval.status === 'accepted' || approval.status === 'approved') ? (
@@ -548,7 +568,9 @@ const DirectorReviewView = ({ reviewId }) => {
                               <AlertCircle className="w-4 h-4 text-gray-600" />
                             )}
                             <span className="text-blue-900">
-                              {approval.director_name}: <strong>{
+                              {approval.director_name}
+                              {approval.role === 'admin' && <span className="ml-1 text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded-full">Admin</span>}
+                              : <strong>{
                                 (approval.status === 'accepted' || approval.status === 'approved') ? 'Attending' :
                                 (approval.status === 'declined' || approval.status === 'rejected') ? 'Not available' :
                                 'Pending'
