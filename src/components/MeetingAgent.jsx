@@ -1750,80 +1750,120 @@ const MeetingAgent = () => {
   // A meeting counts as "confirmed" for Outlook when its own flag/status says so.
   const isApproved = m => m.approved || m.status === 'scheduled';
 
-  // Format a date + "HH:MM" time string as an ICS local datetime (YYYYMMDDTHHMMSS).
+  // Escape a TEXT value per RFC 5545 (backslash, semicolon, comma, newline).
+  const escapeICSText = (s) => String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+
+  // Fold a content line at 75 octets (RFC 5545); continuation lines start with a
+  // space. UTF-8 aware, so Swedish characters (å/ä/ö) are never split mid-byte.
+  const foldICSLine = (line) => {
+    const enc = new TextEncoder();
+    if (enc.encode(line).length <= 75) return line;
+    const chunks = [];
+    let cur = '';
+    let limit = 75; // first line 75 octets; continuation lines 74 (+1 leading space)
+    for (const ch of line) {
+      if (enc.encode(cur + ch).length > limit) {
+        chunks.push(cur);
+        cur = ch;
+        limit = 74;
+      } else {
+        cur += ch;
+      }
+    }
+    if (cur) chunks.push(cur);
+    return chunks.join('\r\n ');
+  };
+
+  // Date parts (YYYY, MM, DD) for a date in Europe/Stockholm — robust regardless
+  // of the runner's system timezone (meeting.time is already Stockholm wall-clock).
+  const stockholmDateParts = (date) => {
+    const d = date instanceof Date ? date : new Date(date);
+    const [y, m, day] = d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' }).split('-');
+    return { y, m, day };
+  };
+
+  // Format date + "HH:MM" as a local ICS datetime (YYYYMMDDTHHMMSS) in Stockholm
+  // wall-clock. Pair with TZID=Europe/Stockholm (see buildICSCalendar).
   const formatICSDateTime = (date, time) => {
-    const [hours, minutes] = time.split(':');
-    const dt = new Date(date);
-    dt.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-
-    const year = dt.getFullYear();
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const day = String(dt.getDate()).padStart(2, '0');
-    const hour = String(dt.getHours()).padStart(2, '0');
-    const minute = String(dt.getMinutes()).padStart(2, '0');
-
-    return `${year}${month}${day}T${hour}${minute}00`;
+    const { y, m, day } = stockholmDateParts(date);
+    const [hh = '00', mm = '00'] = String(time || '00:00').split(':');
+    return `${y}${m}${day}T${hh.padStart(2, '0')}${mm.padStart(2, '0')}00`;
   };
 
-  // Add durationMinutes to an ICS datetime string and return a new ICS datetime.
-  const calculateEndTime = (startDateTime, durationMinutes) => {
-    const dt = new Date(startDateTime.slice(0, 4),
-                       parseInt(startDateTime.slice(4, 6)) - 1,
-                       startDateTime.slice(6, 8),
-                       startDateTime.slice(9, 11),
-                       startDateTime.slice(11, 13));
-    dt.setMinutes(dt.getMinutes() + durationMinutes);
+  // Current UTC timestamp in ICS form (YYYYMMDDTHHMMSSZ) for DTSTAMP.
+  const icsStampUTC = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 
-    const year = dt.getFullYear();
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const day = String(dt.getDate()).padStart(2, '0');
-    const hour = String(dt.getHours()).padStart(2, '0');
-    const minute = String(dt.getMinutes()).padStart(2, '0');
-
-    return `${year}${month}${day}T${hour}${minute}00`;
-  };
+  // VTIMEZONE block for Europe/Stockholm (EU DST rules) so events render at the
+  // correct wall-clock time in every viewer's calendar — including overseas
+  // organizers, who would otherwise see floating local time shifted to their TZ.
+  const STOCKHOLM_VTIMEZONE = [
+    'BEGIN:VTIMEZONE',
+    'TZID:Europe/Stockholm',
+    'BEGIN:STANDARD',
+    'DTSTART:19701025T030000',
+    'TZOFFSETFROM:+0200',
+    'TZOFFSETTO:+0100',
+    'TZNAME:CET',
+    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+    'END:STANDARD',
+    'BEGIN:DAYLIGHT',
+    'DTSTART:19700329T020000',
+    'TZOFFSETFROM:+0100',
+    'TZOFFSETTO:+0200',
+    'TZNAME:CEST',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+    'END:DAYLIGHT',
+    'END:VTIMEZONE'
+  ];
 
   // Build a full VCALENDAR string from a list of meetings.
   // forceConfirmed=true marks every event STATUS:CONFIRMED with no [PRELIMINÄR]
   // prefix (used by the approved-only export, where every meeting is already approved).
   const buildICSCalendar = (meetingList, { calName, calDesc = '', forceConfirmed = false } = {}) => {
-    const icsContent = [
+    const dtstamp = icsStampUTC();
+    const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//IML Meeting Agent//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
-      `X-WR-CALNAME:${calName}`,
-      'X-WR-TIMEZONE:Europe/Stockholm'
+      `X-WR-CALNAME:${escapeICSText(calName)}`,
+      'X-WR-TIMEZONE:Europe/Stockholm',
+      ...(calDesc ? [`X-WR-CALDESC:${escapeICSText(calDesc)}`] : []),
+      ...STOCKHOLM_VTIMEZONE
     ];
-    if (calDesc) {
-      icsContent.push(`X-WR-CALDESC:${calDesc}`);
-    }
 
     meetingList.forEach((meeting) => {
       const startDateTime = formatICSDateTime(meeting.date, meeting.time);
-      const endDateTime = calculateEndTime(startDateTime, meeting.duration);
-      const timestamp = formatICSDateTime(new Date(), '12:00');
       const approved = forceConfirmed || isApproved(meeting);
       const summaryPrefix = approved ? '' : '[PRELIMINÄR] ';
       const status = approved ? 'CONFIRMED' : 'TENTATIVE';
-      const descNote = approved ? '' : 'OBS: Detta möte är ännu ej godkänt av direktörerna.\\n\\n';
+      const descNote = approved ? '' : 'OBS: Detta möte är ännu ej godkänt av direktörerna.\n\n';
+      // Stable UID (no Date.now()) so re-importing UPDATES events instead of duplicating.
+      const uid = `iml-meeting-${meeting.id || `${startDateTime}-${meeting.type}`}@institutmittagleffler.se`;
+      const description = `${descNote}${meeting.description || ''}\n\nParticipants: ${(meeting.participants || []).join(', ')}`;
 
-      icsContent.push('BEGIN:VEVENT');
-      icsContent.push(`UID:iml-meeting-${meeting.id}-${Date.now()}@institutmittagleffler.se`);
-      icsContent.push(`DTSTAMP:${timestamp}`);
-      icsContent.push(`DTSTART:${startDateTime}`);
-      icsContent.push(`DTEND:${endDateTime}`);
-      icsContent.push(`SUMMARY:${summaryPrefix}${meeting.type} - ${meeting.programName}`);
-      icsContent.push(`DESCRIPTION:${descNote}${meeting.description}\\n\\nParticipants: ${meeting.participants.join(', ')}`);
-      icsContent.push(`LOCATION:Institut Mittag-Leffler`);
-      icsContent.push(`CATEGORIES:${meeting.programType}`);
-      icsContent.push(`STATUS:${status}`);
-      icsContent.push('END:VEVENT');
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${dtstamp}`,
+        `DTSTART;TZID=Europe/Stockholm:${startDateTime}`,
+        `DURATION:PT${meeting.duration || 30}M`,
+        `SUMMARY:${escapeICSText(`${summaryPrefix}${meeting.type} - ${meeting.programName}`)}`,
+        `DESCRIPTION:${escapeICSText(description)}`,
+        'LOCATION:Institut Mittag-Leffler',
+        `CATEGORIES:${escapeICSText(meeting.programType)}`,
+        `STATUS:${status}`,
+        'END:VEVENT'
+      );
     });
 
-    icsContent.push('END:VCALENDAR');
-    return icsContent.join('\r\n');
+    lines.push('END:VCALENDAR');
+    return lines.map(foldICSLine).join('\r\n');
   };
 
   // Trigger a browser download of an .ics file.
