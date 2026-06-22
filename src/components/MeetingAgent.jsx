@@ -226,23 +226,26 @@ const MeetingAgent = () => {
             ).length || 0;
 
             const approved = approvedCount > 0 && rejectedCount === 0;
-            // Dashboard shows director responses only; admin attendance is managed
-            // in the reviewer view, so keep admin rows out of meeting.approvals to
-            // avoid inflating director-response badges/warnings.
-            const approvals = (dbMeeting.approvals || []).filter(a => a.role !== 'admin');
+            // Director responses gate the approval badge/counts; admin responses are
+            // attendance only. Keep them in separate fields so admin rows never
+            // inflate the director badge, but are still shown in their own section.
+            const allApprovals = dbMeeting.approvals || [];
+            const approvals = allApprovals.filter(a => a.role !== 'admin');
+            const adminApprovals = allApprovals.filter(a => a.role === 'admin');
 
             // No approval-relevant change → keep the same object reference.
             if (
               meeting.approvedCount === approvedCount &&
               meeting.rejectedCount === rejectedCount &&
               meeting.approved === approved &&
-              (meeting.approvals?.length || 0) === approvals.length
+              (meeting.approvals?.length || 0) === approvals.length &&
+              (meeting.adminApprovals?.length || 0) === adminApprovals.length
             ) {
               return meeting;
             }
 
             changed = true;
-            return { ...meeting, approvedCount, rejectedCount, approvals, approved };
+            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved };
           });
 
           // Nothing changed → return the SAME array so no re-render / no auto-save.
@@ -1197,13 +1200,15 @@ const MeetingAgent = () => {
 
             console.log(`[REFRESH] Matched "${meeting.type}" - ${approvedCount} approved, ${rejectedCount} rejected`);
 
-            // Update meeting with approval info (director responses only on the
-            // dashboard; admin attendance is shown in the reviewer view).
+            // Director responses gate the badge/counts; admin responses are
+            // attendance, kept in a separate field for their own section.
+            const allApprovals = dbMeeting.approvals || [];
             return {
               ...meeting,
               approvedCount,
               rejectedCount,
-              approvals: (dbMeeting.approvals || []).filter(a => a.role !== 'admin'),
+              approvals: allApprovals.filter(a => a.role !== 'admin'),
+              adminApprovals: allApprovals.filter(a => a.role === 'admin'),
               approved: approvedCount > 0 && rejectedCount === 0
             };
           }
@@ -2884,6 +2889,35 @@ const MeetingAgent = () => {
                             <p className="text-xs font-semibold text-blue-800 mb-2">Director Attendance:</p>
                             {meeting.approvals.map((approval, idx) => (
                               <div key={idx} className="text-xs text-blue-900 mb-1">
+                                <strong>{approval.director_name}:</strong>{' '}
+                                <span className={
+                                  (approval.status === 'accepted' || approval.status === 'approved')
+                                    ? 'text-green-700 font-semibold'
+                                    : (approval.status === 'declined' || approval.status === 'rejected')
+                                    ? 'text-red-700 font-semibold'
+                                    : 'text-gray-600'
+                                }>
+                                  {(approval.status === 'accepted' || approval.status === 'approved') ? 'Attending' :
+                                   (approval.status === 'declined' || approval.status === 'rejected') ? 'Cannot attend' :
+                                   'Pending'}
+                                </span>
+                                {approval.comment && (
+                                  <span className="text-gray-700"> - "{approval.comment}"</span>
+                                )}
+                                {approval.suggested_date && (
+                                  <span className="text-gray-700"> (Suggested: {approval.suggested_date} {approval.suggested_time})</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Admin Attendance Details — separate from the director badge/counts */}
+                        {meeting.adminApprovals && meeting.adminApprovals.length > 0 && (
+                          <div className="bg-purple-50 p-3 rounded-lg mt-2">
+                            <p className="text-xs font-semibold text-purple-800 mb-2">Admin Attendance:</p>
+                            {meeting.adminApprovals.map((approval, idx) => (
+                              <div key={idx} className="text-xs text-purple-900 mb-1">
                                 <strong>{approval.director_name}:</strong>{' '}
                                 <span className={
                                   (approval.status === 'accepted' || approval.status === 'approved')
