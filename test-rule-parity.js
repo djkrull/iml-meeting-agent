@@ -1,6 +1,11 @@
 // Golden parity test: the config-driven rule engine (src/utils/meetingRuleEngine)
 // seeded from server/defaultSettings must produce IDENTICAL meeting dates to the
-// historical hardcoded logic, for every non-weekly rule. Run: node test-rule-parity.js
+// reference logic below, for every non-weekly rule. Run: node test-rule-parity.js
+//
+// The reference logic is the historical hardcoded calculateMeetingDate. Two rules
+// have since diverged from history by an explicit IML policy decision (2026-08,
+// Sofie Upmark) — see the EXPECTED table. Everything else must still match the
+// original hardcoded dates exactly.
 const { Pool } = require('pg');
 const { resolveMeetingDate } = require('./src/utils/meetingRuleEngine');
 const { buildDefaultConfig } = require('./server/defaultSettings');
@@ -32,13 +37,19 @@ function oldCalc(startDate, endDate, leadTime, weekday, programType) {
   return t;
 }
 
-// OLD leadTime/weekday by rule name (the historical hardcoded values).
+// Expected leadTime/weekday by rule name. Unless flagged `policy`, these are the
+// historical hardcoded values and must never drift.
 const OLD = {
   'Introduction Meeting': { lead: -540, wd: 5, introGate: true },
   'Check-in meeting with organizers': { lead: -180, wd: 5 },
   'Check-in meeting junior fellows': { lead: -180, wd: 5 },
-  'Onboarding meeting': { lead: -5, wd: 5 },
-  'Program Start Meeting': { lead: 0, wd: undefined },
+  // POLICY 2026-08: moved from "Friday BEFORE start" (lead -5) to the first
+  // Friday AFTER start. Verified against Fall 2026 (start Wed 2 Sep → Fri 4 Sep).
+  'Onboarding meeting': { lead: 1, wd: 5, policy: '2026-08 first Friday after start' },
+  // POLICY 2026-08: moved from "exactly on start" (lead 0, no weekday) to the
+  // first Tuesday AFTER start, tied to the first seminar.
+  // Verified against Fall 2026 (start Wed 2 Sep → Tue 8 Sep).
+  'Program Start Meeting': { lead: 1, wd: 2, policy: '2026-08 first Tuesday after start' },
   'Mid-term meeting': { lead: 42, wd: 5 },
   'Evaluation meeting/lunch': { lead: 'end', wd: 5 },
   'Meeting with organizer and B&P': { lead: -120, wd: 5 },

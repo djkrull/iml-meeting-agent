@@ -18,7 +18,9 @@ const after  = (amount, unit = 'days') => ({ amount, unit, direction: 'after' })
 const onDay  = () => ({ amount: 0, unit: 'days', direction: 'on' });
 
 const weekdayPlacement = (weekday, snap = 'forward') => ({ mode: 'weekday', weekday, snap });
-const exactPlacement   = () => ({ mode: 'exact', weekday: null, snap: null });
+// No seeded rule uses exact placement any more (Program Start moved to a weekday
+// rule in 2026-08), but the mode is still supported by the engine + Settings UI.
+const exactPlacement   = () => ({ mode: 'exact', weekday: null, snap: null }); // eslint-disable-line no-unused-vars
 
 // --- rosters --------------------------------------------------------------
 const directors = [
@@ -53,16 +55,24 @@ const commonSpringFall = () => ([
     description: 'Junior fellow orientation and support',
   },
   {
+    // POLICY 2026-08 (Sofie Upmark): first Friday AFTER program start — the
+    // onboarding is only useful once participants are actually on site.
+    // Was: 5 days BEFORE start, snapped forward to Friday (i.e. the Friday before).
     id: 'onboarding', name: 'Onboarding meeting',
-    anchor: 'start', offset: before(5), placement: weekdayPlacement(5),
+    anchor: 'start', offset: after(1), placement: weekdayPlacement(5),
     time: DEFAULT_TIME, duration: 30,
     participants: ['Admin Team', 'Organizers', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
     description: 'Practical information and house rules',
   },
   {
+    // POLICY 2026-08 (Sofie Upmark): first Tuesday AFTER program start, held in
+    // connection with the first seminar. Was: exactly on the start date.
+    // The +1 day offset makes "after" strict, so a program starting on a Tuesday
+    // gets the FOLLOWING Tuesday rather than its own start date.
+    // NOTE: the seminar schedule decides the TIME — adjust per program.
     id: 'program_start', name: 'Program Start Meeting',
-    anchor: 'start', offset: onDay(), placement: exactPlacement(),
+    anchor: 'start', offset: after(1), placement: weekdayPlacement(2),
     time: DEFAULT_TIME, duration: 30,
     participants: ['Program Organizers', 'All Participants', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
