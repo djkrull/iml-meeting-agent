@@ -38,13 +38,20 @@ The user and all IML/KVA operations are in **Sweden (CET/CEST, UTC+1/+2)**. All 
 
 **Don't trust the UI's meeting count** — state and DB can drift. Validate the DB directly when debugging.
 
+## Meeting identity — `meeting.id` is NOT unique (don't regress)
+
+Changing a meeting's date INSERTS a new `program_meetings` row (unique constraint is `(program_name, type, date)`) that **reuses the same `meeting_id`**. Until the stale row is deleted, two different meetings share one id. Never answer "is this the same meeting?" with `a.id === b.id`.
+
+Use [src/utils/meetingIdentity.js](src/utils/meetingIdentity.js) — `meetingKey(m)` = `program|type|localDate|time`, plus `localDateKey`/`dateFromKey`. Regression test: [test-meeting-identity.js](test-meeting-identity.js). Symptoms this caused (fixed 2026-08): approvals shown on the wrong card, TIME CONFLICT badge on unrelated meetings, and dates off by one day (`toISOString()` gives the UTC day; local midnight stores as 22:00/23:00Z the previous day).
+
 ## Business rules (enforce in parsing/generation)
 
 - **Max 1 Spring Program + 1 Fall Program per year.** If multiple candidates, keep the longest (multi-month) and reclassify extras as Summer Conference.
 - **Short programs (< 30 days) in May–August are Summer Conferences**, even if they start in August. Never categorize by start-month alone — check duration.
 - **Summer Conference Introduction Meeting / Check-in Meeting (Group 1/2) are shared per year** (one meeting for all summer conferences combined), not per individual conference. Create once per `(year, meeting_type)`, using the earliest summer conference of that year as the reference date for the lead-time calc.
+- **Onboarding meeting + Program Start Meeting come AFTER program start** (policy from Sofie Upmark, 2026-08 — applies to both Spring and Fall). Onboarding = **first Friday after** program start; Program Start Meeting = **first Tuesday after** program start, held in connection with the first seminar. Both are `offset: after(1 day)` + weekday placement (Fri / Tue, snap forward) — the +1 day makes "after" strict. Historically these were 5 days *before* start (snapped to Friday) and exactly *on* the start date; [test-rule-parity.js](test-rule-parity.js) records the divergence in its `OLD` table. **The TIME is not part of the rule** — "anpassas efter seminarieschemat" — set it per program.
 - **Weekly meetings (Welcome, Onboarding light) must generate for all program types**, not only Summer Conferences. Spring/Fall programs run weekly cycles throughout their duration (cap at 52 weeks; Summer at 2 weeks).
-- **Cyclical time inheritance**: when generating meetings for year N, look up the previous year's meeting with the same `(programType, meetingType)` and inherit its time. The anchor is the **TYPE** (Spring / Fall / Summer Conference / Kleindagarna), NOT the program name — names change year to year; types cycle.
+- **Cyclical time inheritance**: when generating meetings for year N, look up the previous year's meeting with the same `(programType, meetingType)` and inherit its time. The anchor is the **TYPE** (Spring / Fall / Summer Conference / Kleindagarna), NOT the program name — names change year to year; types cycle. **Gotcha**: `program_meetings` only holds *future* rows, so the earliest program of a type has no previous year to inherit from and falls back to the rule's `time`.
 
 ## Placeholder / filtering rules
 

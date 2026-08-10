@@ -5,6 +5,7 @@ import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, cl
 import SettingsPanel from './Settings';
 import { resolveMeetingDate } from '../utils/meetingRuleEngine';
 import { createIsClosed } from '../utils/swedishHolidays';
+import { localDateKey, dateFromKey, meetingKey } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
@@ -17,7 +18,7 @@ const MeetingAgent = () => {
   const [loading, setLoading] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [editingMeetingId, setEditingMeetingId] = useState(null);
+  const [editingMeetingKey, setEditingMeetingKey] = useState(null);
   const [editedDescription, setEditedDescription] = useState('');
   const [filters, setFilters] = useState({
     'Spring Program': true,
@@ -199,20 +200,18 @@ const MeetingAgent = () => {
         setMeetings(currentMeetings => {
           let changed = false;
           const next = currentMeetings.map(meeting => {
-            const dbMeeting = review.meetings.find(m => {
-              // Must match program name and type
-              if (m.program_name !== meeting.programName || m.type !== meeting.type) return false;
-
-              // For "All Summer Conferences", also match by year
-              if (meeting.programName === 'All Summer Conferences') {
-                const dbYear = new Date(m.date).getFullYear();
-                const meetingYear = meeting.date.getFullYear();
-                return dbYear === meetingYear;
-              }
-
-              // For other programs, match works fine (unique per year typically)
-              return true;
-            });
+            // Match on program + type + DATE. Matching on program+type alone made
+            // `.find()` return the first row of that type, so when a program had
+            // two rows of the same type on different dates (a moved meeting whose
+            // old row still existed) the new date inherited the OLD date's
+            // approvals — showing "2/2 directors" for answers nobody gave.
+            // Approvals belong to a specific date; if the review row hasn't been
+            // synced yet the card correctly shows none until it is.
+            const dbMeeting = review.meetings.find(m =>
+              m.program_name === meeting.programName &&
+              m.type === meeting.type &&
+              localDateKey(m.date) === localDateKey(meeting.date)
+            );
 
             if (!dbMeeting) return meeting;
 
@@ -943,10 +942,14 @@ const MeetingAgent = () => {
     }
   };
 
-  // Toggle meeting approval
-  const toggleApproval = (meetingId) => {
+  // Toggle meeting approval.
+  // These handlers take the meeting itself, not its id: `id` is not unique (see
+  // utils/meetingIdentity), so `m.id === meetingId` inside a .map() would apply
+  // the change to EVERY meeting sharing that id, not just the one clicked.
+  const toggleApproval = (meeting) => {
+    const key = meetingKey(meeting);
     setMeetings(meetings.map(m =>
-      m.id === meetingId
+      meetingKey(m) === key
         ? { ...m, approved: !m.approved, status: !m.approved ? 'approved' : 'pending' }
         : m
     ));
@@ -962,18 +965,20 @@ const MeetingAgent = () => {
   };
 
   // Mark as scheduled
-  const markScheduled = (meetingId) => {
+  const markScheduled = (meeting) => {
+    const key = meetingKey(meeting);
     setMeetings(meetings.map(m =>
-      m.id === meetingId
+      meetingKey(m) === key
         ? { ...m, status: 'scheduled' }
         : m
     ));
   };
 
   // Toggle already scheduled status
-  const toggleAlreadyScheduled = (meetingId) => {
+  const toggleAlreadyScheduled = (meeting) => {
+    const key = meetingKey(meeting);
     setMeetings(meetings.map(m =>
-      m.id === meetingId
+      meetingKey(m) === key
         ? {
             ...m,
             status: m.status === 'already-scheduled' ? 'pending' : 'already-scheduled',
@@ -984,14 +989,12 @@ const MeetingAgent = () => {
   };
 
   // Sync meeting to review if active review exists
-  const syncMeetingToReview = async (meetingId, updates) => {
+  const syncMeetingToReview = async (meeting, updates) => {
     if (!currentReviewId) return;
 
     try {
-      // Find the meeting to get its programName and type
-      const meeting = meetings.find(m => m.id === meetingId);
       if (!meeting) {
-        console.warn(`Meeting ${meetingId} not found for sync`);
+        console.warn('No meeting supplied for sync');
         return;
       }
 
@@ -1011,29 +1014,32 @@ const MeetingAgent = () => {
     }
   };
 
-  // Update meeting date
-  const updateMeetingDate = async (meetingId, newDate) => {
+  // Update meeting date. The key is captured BEFORE the map — the meeting's own
+  // identity changes as soon as its date does.
+  const updateMeetingDate = async (meeting, newDate) => {
     const dateObj = new Date(newDate);
+    const key = meetingKey(meeting);
     setMeetings(meetings.map(m =>
-      m.id === meetingId
+      meetingKey(m) === key
         ? { ...m, date: dateObj }
         : m
     ));
 
     // Sync to review if exists
-    await syncMeetingToReview(meetingId, { date: dateObj.toISOString() });
+    await syncMeetingToReview(meeting, { date: dateObj.toISOString() });
   };
 
   // Update meeting time
-  const updateMeetingTime = async (meetingId, newTime) => {
+  const updateMeetingTime = async (meeting, newTime) => {
+    const key = meetingKey(meeting);
     setMeetings(meetings.map(m =>
-      m.id === meetingId
+      meetingKey(m) === key
         ? { ...m, time: newTime }
         : m
     ));
 
     // Sync to review if exists
-    await syncMeetingToReview(meetingId, { time: newTime });
+    await syncMeetingToReview(meeting, { time: newTime });
   };
 
   // Format date for input field (YYYY-MM-DD)
@@ -1073,22 +1079,24 @@ const MeetingAgent = () => {
     XLSX.writeFile(wb, `IML_Meetings_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  // Edit meeting description
+  // Edit meeting description. Tracked by identity key, not id — with a shared id
+  // the editor opened on two cards at once and saved to both.
   const startEditing = (meeting) => {
-    setEditingMeetingId(meeting.id);
+    setEditingMeetingKey(meetingKey(meeting));
     setEditedDescription(meeting.description || '');
   };
 
   const cancelEditing = () => {
-    setEditingMeetingId(null);
+    setEditingMeetingKey(null);
     setEditedDescription('');
   };
 
-  const saveDescription = (meetingId) => {
+  const saveDescription = (meeting) => {
+    const key = meetingKey(meeting);
     setMeetings(meetings.map(m =>
-      m.id === meetingId ? { ...m, description: editedDescription } : m
+      meetingKey(m) === key ? { ...m, description: editedDescription } : m
     ));
-    setEditingMeetingId(null);
+    setEditingMeetingKey(null);
     setEditedDescription('');
   };
 
@@ -1177,21 +1185,14 @@ const MeetingAgent = () => {
       // Update meetings with approval counts from the database
       setMeetings(prevMeetings => {
         return prevMeetings.map(meeting => {
-          // Match by characteristics (program_name + type) with year check for Summer Conferences
-          const dbMeeting = reviewData.meetings.find(m => {
-            // Must match program name and type
-            if (m.program_name !== meeting.programName || m.type !== meeting.type) return false;
-
-            // For "All Summer Conferences", also match by year
-            if (meeting.programName === 'All Summer Conferences') {
-              const dbYear = new Date(m.date).getFullYear();
-              const meetingYear = meeting.date.getFullYear();
-              return dbYear === meetingYear;
-            }
-
-            // For other programs, match works fine
-            return true;
-          });
+          // Match on program + type + DATE — see the same fix in the 30s refresh
+          // above. program+type alone let a moved meeting inherit the approvals
+          // of the stale row it replaced.
+          const dbMeeting = reviewData.meetings.find(m =>
+            m.program_name === meeting.programName &&
+            m.type === meeting.type &&
+            localDateKey(m.date) === localDateKey(meeting.date)
+          );
 
           if (dbMeeting) {
             const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -1262,7 +1263,10 @@ const MeetingAgent = () => {
         const review = await res.json();
         const db = review.meetings?.find(m => m.id === meeting.reviewMeetingId);
         const adminApprovals = (db?.approvals || []).filter(a => a.role === 'admin');
-        setMeetings(prev => prev.map(m => m.id === meeting.id ? { ...m, adminApprovals } : m));
+        // Identity, not id — otherwise attendance recorded on one meeting was
+        // also painted onto any other meeting sharing that id.
+        const key = meetingKey(meeting);
+        setMeetings(prev => prev.map(m => meetingKey(m) === key ? { ...m, adminApprovals } : m));
       }
     } catch (error) {
       console.error('Failed to record admin attendance:', error);
@@ -1611,10 +1615,11 @@ const MeetingAgent = () => {
       const syncResult = await syncResponse.json();
 
       if (syncResult.changes > 0) {
-        // Update local meeting to remove approval badges
+        // Update local meeting to remove approval badges (by identity, not id)
+        const syncedKey = meetingKey(meeting);
         setMeetings(currentMeetings =>
           currentMeetings.map(m =>
-            m.id === meeting.id
+            meetingKey(m) === syncedKey
               ? { ...m, approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 }
               : m
           )
@@ -2065,7 +2070,7 @@ const MeetingAgent = () => {
     const timeSlots = new Map();
 
     filteredMeetings.forEach(meeting => {
-      const dateStr = meeting.date.toISOString().split('T')[0];
+      const dateStr = localDateKey(meeting.date); // Stockholm-local day, not UTC
       const key = `${dateStr}|${meeting.time}`;
 
       if (timeSlots.has(key)) {
@@ -2091,8 +2096,11 @@ const MeetingAgent = () => {
           meetings: []
         });
       }
+      // De-duplicate on identity, not on `id`. Two genuinely different meetings
+      // can share an id, and collapsing them here hid one side of a real clash —
+      // the panel then showed a "conflict" listing a single meeting.
       conflict.meetings.forEach(m => {
-        if (!conflictMap.get(key).meetings.find(existing => existing.id === m.id)) {
+        if (!conflictMap.get(key).meetings.find(existing => meetingKey(existing) === meetingKey(m))) {
           conflictMap.get(key).meetings.push(m);
         }
       });
@@ -2103,10 +2111,13 @@ const MeetingAgent = () => {
 
   const conflicts = detectConflicts();
 
-  // Helper to check if a meeting is in conflict
+  // Helper to check if a meeting is in conflict. Compares identity, not `id` —
+  // with a shared id, flagging one meeting put the TIME CONFLICT badge on an
+  // unrelated meeting that merely reused the same id.
   const isConflictingMeeting = (meeting) => {
+    const key = meetingKey(meeting);
     return conflicts.some(conflict =>
-      conflict.meetings.some(m => m.id === meeting.id)
+      conflict.meetings.some(m => meetingKey(m) === key)
     );
   };
 
@@ -2142,8 +2153,10 @@ const MeetingAgent = () => {
       const meetingsToMove = conflict.meetings.slice(1);
 
       meetingsToMove.forEach(meetingToMove => {
-        // Find this meeting in the array
-        const index = updatedMeetings.findIndex(m => m.id === meetingToMove.id);
+        // Find this meeting in the array by identity — `id` is not unique, so
+        // findIndex could return a different meeting and move the wrong one.
+        const moveKey = meetingKey(meetingToMove);
+        const index = updatedMeetings.findIndex(m => meetingKey(m) === moveKey);
         if (index === -1) return;
 
         const hasDirectors = involvesDirectors(meetingToMove);
@@ -2186,13 +2199,14 @@ const MeetingAgent = () => {
           }
 
           const testTime = `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
-          const testDateStr = testDate.toISOString().split('T')[0];
+          const testDateStr = localDateKey(testDate); // local day — testDate is built with local getDay/setDate
 
-          // Check if this time is available
-          const isOccupied = updatedMeetings.some(m => {
-            const mDateStr = new Date(m.date).toISOString().split('T')[0];
-            return mDateStr === testDateStr && m.time === testTime && m.id !== meetingToMove.id;
-          });
+          // Check if this time is available (identity again, not id)
+          const isOccupied = updatedMeetings.some(m =>
+            localDateKey(m.date) === testDateStr &&
+            m.time === testTime &&
+            meetingKey(m) !== moveKey
+          );
 
           if (!isOccupied) {
             // Found available slot
@@ -2449,7 +2463,7 @@ const MeetingAgent = () => {
                           <div className="flex items-center mb-3">
                             <Clock className="w-5 h-5 text-red-600 mr-2" />
                             <span className="font-bold text-red-800">
-                              {new Date(conflict.date).toLocaleDateString('sv-SE', {
+                              {dateFromKey(conflict.date).toLocaleDateString('sv-SE', {
                                 weekday: 'long',
                                 year: 'numeric',
                                 month: 'long',
@@ -2881,7 +2895,7 @@ const MeetingAgent = () => {
                               <input
                                 type="date"
                                 value={formatDateForInput(meeting.date)}
-                                onChange={(e) => updateMeetingDate(meeting.id, e.target.value)}
+                                onChange={(e) => updateMeetingDate(meeting, e.target.value)}
                                 className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                               />
                             ) : (
@@ -2903,7 +2917,7 @@ const MeetingAgent = () => {
                               <input
                                 type="time"
                                 value={meeting.time}
-                                onChange={(e) => updateMeetingTime(meeting.id, e.target.value)}
+                                onChange={(e) => updateMeetingTime(meeting, e.target.value)}
                                 className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                               />
                             ) : (
@@ -2929,7 +2943,7 @@ const MeetingAgent = () => {
 
                         {/* Description with Edit capability */}
                         <div className="mb-2">
-                          {editingMeetingId === meeting.id ? (
+                          {editingMeetingKey === meetingKey(meeting) ? (
                             <div className="flex gap-2 items-start">
                               <textarea
                                 value={editedDescription}
@@ -2938,7 +2952,7 @@ const MeetingAgent = () => {
                                 rows="3"
                               />
                               <button
-                                onClick={() => saveDescription(meeting.id)}
+                                onClick={() => saveDescription(meeting)}
                                 className="px-3 py-2 bg-green-100 text-green-800 rounded-lg hover:bg-green-200 transition"
                                 title="Save"
                               >
@@ -3081,7 +3095,7 @@ const MeetingAgent = () => {
                               Already Scheduled
                             </div>
                             <button
-                              onClick={() => toggleAlreadyScheduled(meeting.id)}
+                              onClick={() => toggleAlreadyScheduled(meeting)}
                               className="px-4 py-2 rounded-lg font-medium bg-orange-100 text-orange-800 hover:bg-orange-200 transition text-sm"
                             >
                               Undo
@@ -3090,7 +3104,7 @@ const MeetingAgent = () => {
                         ) : (
                           <>
                             <button
-                              onClick={() => toggleApproval(meeting.id)}
+                              onClick={() => toggleApproval(meeting)}
                               className={`px-4 py-2 rounded-lg font-medium transition ${
                                 meeting.approved
                                   ? 'bg-green-100 text-green-800 hover:bg-green-200'
@@ -3102,7 +3116,7 @@ const MeetingAgent = () => {
 
                             {meeting.approved && meeting.status !== 'scheduled' && (
                               <button
-                                onClick={() => markScheduled(meeting.id)}
+                                onClick={() => markScheduled(meeting)}
                                 className="px-4 py-2 rounded-lg font-medium bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition"
                               >
                                 Mark Scheduled
@@ -3110,7 +3124,7 @@ const MeetingAgent = () => {
                             )}
 
                             <button
-                              onClick={() => toggleAlreadyScheduled(meeting.id)}
+                              onClick={() => toggleAlreadyScheduled(meeting)}
                               className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 transition text-sm"
                             >
                               Already Scheduled
