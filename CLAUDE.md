@@ -99,7 +99,21 @@ Three symptoms this caused on the dashboard (all fixed 2026-08, all traced to th
 Creating/updating a review records `activeReviewId` in config; `GET /api/reviews/active` lets any admin device converge on the latest shared review instead of a stale localStorage id.
 
 ### Auto-save clobber gotcha (don't regress)
-The dashboard auto-saves the whole meetings array to `program_meetings` (upsert) on state change. A stale tab can silently overwrite out-of-band edits, so: the 30s approval refresh must NOT trigger a save unless approval data actually changed; tabs re-sync meeting times on focus; and **Settings/regenerate use their own endpoints**, never the meetings auto-save.
+The dashboard auto-saves to `program_meetings` (upsert) on state change. A stale tab can silently overwrite out-of-band edits, so: the 30s approval refresh must NOT trigger a save unless approval data actually changed; tabs re-sync meeting times on focus; and **Settings/regenerate use their own endpoints**, never the meetings auto-save.
+
+**The auto-save sends only CHANGED rows** (`changedMeetings`/`scheduleSignature` in [meetingIdentity.js](src/utils/meetingIdentity.js), diffed against `serverScheduleRef` — what the server is known to hold, seeded on load/reload/regenerate and updated after each save and focus re-sync). Don't go back to POSTing the whole array: the backend upserts everything it's handed, so a full payload made *any* state change a full rewrite of the schedule from that tab's copy.
+
+That is how four deleted meetings came back on 2026-08-13. The user had two dashboard windows open from before an edit. Re-pointing a review row made the read-only 30s approval poll find "new" responses; it updated `meetings` purely so the cards could render them, and the auto-save pushed the whole stale array — re-inserting rows that had just been deleted. **Approval-derived fields (`approved`, `approvals`, `adminApprovals`, `approvedCount`, `rejectedCount`, `reviewMeetingId`) are excluded from `scheduleSignature` on purpose** — they're re-derived from the review on every refresh, so including them would make that read-only poll write again. Deliberate approve/schedule toggles also move `status`, so they still persist.
+
+The focus re-sync also **drops local rows the server no longer has** — but only when the row's signature matches the snapshot, proving the server once held that exact row. Otherwise an unsaved local edit would be thrown away.
+
+### A date change must MOVE the row, not upsert a second one
+`POST /api/programs/move-meeting` → `dbHelpers.moveMeeting` (transactional: delete whatever occupies the target slot, then UPDATE the source row onto it; the row keeps its `meeting_id`). The inline editor calls it whenever the date changes.
+
+Without it the plain save only upserts, and the unique key is `(program_name, type, date)` — so every date edit inserted a second row and orphaned the old one. Fixing the per-keystroke editor cut this from one duplicate *per keystroke* to one *per date change*; the move endpoint is what actually closes it. `moved: 0` means the caller's `fromDate` matched nothing (stale client) — the normal upsert then inserts the row and there was no stale row to clean up.
+
+### SQLite and Postgres must save with the SAME semantics
+Both branches of `savePrograms` now UPSERT. The SQLite branch used to `DELETE FROM program_meetings` and re-insert the whole payload, which made local dev behave nothing like production — and would have wiped the dev database once the dashboard started sending partial payloads. SQLite init therefore creates `program_meetings_unique_idx` / `programs_unique_idx` (deduplicating first). A plain `CREATE UNIQUE INDEX` is **correct for SQLite** (`ON CONFLICT(cols)` targets columns); only Postgres needs a real named CONSTRAINT. Don't harmonise those two.
 
 ## Business rules (enforce in parsing/generation)
 

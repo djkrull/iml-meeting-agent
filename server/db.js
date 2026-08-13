@@ -332,6 +332,22 @@ function initializeSQLiteDatabase() {
       )
     `);
 
+    // Same uniqueness as production, so local dev can upsert instead of
+    // wipe-and-reinsert. Deduplicate first or the index can't be created.
+    //
+    // A plain UNIQUE INDEX is correct HERE: SQLite's `ON CONFLICT(cols) DO
+    // UPDATE` targets columns, not a constraint name. Postgres is the one that
+    // needs a real named CONSTRAINT (see ensureUniqueConstraint) — don't
+    // "harmonise" these two into the same thing.
+    db.run(`DELETE FROM program_meetings WHERE id NOT IN (
+              SELECT MIN(id) FROM program_meetings GROUP BY program_name, type, date)`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS program_meetings_unique_idx
+              ON program_meetings(program_name, type, date)`);
+    db.run(`DELETE FROM programs WHERE id NOT IN (
+              SELECT MIN(id) FROM programs GROUP BY name, type, year)`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS programs_unique_idx
+              ON programs(name, type, year)`);
+
     // Single-row app configuration (directors, admins, meeting rules, etc.)
     db.run(`
       CREATE TABLE IF NOT EXISTS app_settings (
@@ -504,6 +520,71 @@ const dbHelpers = {
             });
             stmt.finalize((finErr) => finErr ? reject(finErr) : resolve({ replaced: list.length }));
           });
+        });
+      }
+    });
+  },
+
+  // Move ONE meeting to a new date/time, transactionally.
+  //
+  // The normal save only ever upserts, and the unique constraint is
+  // (program_name, type, date) — so changing a date INSERTS a second row and
+  // leaves the old one behind, reusing the same meeting_id. Every date edit
+  // produced a duplicate that way (see "Meeting identity" in CLAUDE.md).
+  //
+  // Deletes whatever already occupies the target slot, then moves the source row
+  // onto it, so a date change can neither leave a duplicate nor become one. The
+  // row keeps its meeting_id. Returns { moved } — 0 means the caller's `fromDate`
+  // matched nothing, in which case the normal upsert will insert the row and
+  // there was no stale row to clean up anyway.
+  moveMeeting: ({ programName, type, fromDate, toDate, time }) => {
+    return new Promise(async (resolve, reject) => {
+      const now = new Date().toISOString();
+      if (USE_POSTGRES) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          // Clear the target slot first so the UPDATE can't hit the constraint.
+          // `date <> $4` protects the source row when only the time changes.
+          await client.query(
+            `DELETE FROM program_meetings
+              WHERE program_name = $1 AND type = $2 AND date = $3 AND date <> $4`,
+            [programName, type, toDate, fromDate]
+          );
+          const res = await client.query(
+            `UPDATE program_meetings
+                SET date = $3, time = $4, updated_at = $5
+              WHERE program_name = $1 AND type = $2 AND date = $6`,
+            [programName, type, toDate, time, now, fromDate]
+          );
+          await client.query('COMMIT');
+          resolve({ moved: res.rowCount });
+        } catch (err) {
+          await client.query('ROLLBACK');
+          reject(err);
+        } finally {
+          client.release();
+        }
+      } else {
+        db.serialize(() => {
+          db.run(
+            `DELETE FROM program_meetings
+              WHERE program_name = ? AND type = ? AND date = ? AND date <> ?`,
+            [programName, type, toDate, fromDate],
+            (delErr) => {
+              if (delErr) return reject(delErr);
+              db.run(
+                `UPDATE program_meetings
+                    SET date = ?, time = ?, updated_at = ?
+                  WHERE program_name = ? AND type = ? AND date = ?`,
+                [toDate, time, now, programName, type, fromDate],
+                function (updErr) {
+                  if (updErr) return reject(updErr);
+                  resolve({ moved: this.changes });
+                }
+              );
+            }
+          );
         });
       }
     });
@@ -1403,57 +1484,66 @@ const dbHelpers = {
             meetingsSkipped
           });
         } else {
-          // SQLite
+          // SQLite — UPSERT, exactly like the Postgres branch above.
+          //
+          // This used to `DELETE FROM program_meetings` and re-insert the whole
+          // payload. That made local dev behave nothing like production (which
+          // has only ever upserted), and it turned lethal once the dashboard
+          // started sending only the rows it changed: a partial payload would
+          // have wiped every other meeting from the dev database.
           db.serialize(() => {
-            db.run('DELETE FROM program_meetings');
-            db.run('DELETE FROM programs', (err) => {
-              if (err) return reject(err);
+            const programStmt = db.prepare(
+              `INSERT INTO programs (program_id, name, type, start_date, end_date, organizer, status, year, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(name, type, year) DO NOTHING`
+            );
 
-              // Insert programs
-              const programStmt = db.prepare(
-                `INSERT INTO programs (program_id, name, type, start_date, end_date, organizer, status, year, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            programs.forEach(program => {
+              const startDate = typeof program.startDate === 'string'
+                ? program.startDate
+                : program.startDate.toISOString();
+              const endDate = program.endDate
+                ? (typeof program.endDate === 'string' ? program.endDate : program.endDate.toISOString())
+                : null;
+
+              programStmt.run(
+                program.id, program.name, program.type, startDate, endDate,
+                program.organizer, program.status, program.year, now, now
               );
+            });
 
-              programs.forEach(program => {
-                const startDate = typeof program.startDate === 'string'
-                  ? program.startDate
-                  : program.startDate.toISOString();
-                const endDate = program.endDate
-                  ? (typeof program.endDate === 'string' ? program.endDate : program.endDate.toISOString())
-                  : null;
+            programStmt.finalize();
 
-                programStmt.run(
-                  program.id, program.name, program.type, startDate, endDate,
-                  program.organizer, program.status, program.year, now, now
-                );
-              });
+            const meetingStmt = db.prepare(
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(program_name, type, date) DO UPDATE SET
+                 time = excluded.time,
+                 duration = excluded.duration,
+                 participants = excluded.participants,
+                 description = excluded.description,
+                 status = excluded.status,
+                 approved = excluded.approved,
+                 program_organizer = excluded.program_organizer,
+                 updated_at = excluded.updated_at`
+            );
 
-              programStmt.finalize();
+            meetings.forEach(meeting => {
+              const meetingDate = typeof meeting.date === 'string'
+                ? meeting.date
+                : meeting.date.toISOString();
 
-              // Insert meetings
-              const meetingStmt = db.prepare(
-                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              meetingStmt.run(
+                meeting.id, meeting.programId, meeting.programName, meeting.programType,
+                meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
+                meeting.time, meeting.duration, JSON.stringify(meeting.participants),
+                meeting.description, meeting.status, meeting.approved ? 1 : 0, now, now
               );
+            });
 
-              meetings.forEach(meeting => {
-                const meetingDate = typeof meeting.date === 'string'
-                  ? meeting.date
-                  : meeting.date.toISOString();
-
-                meetingStmt.run(
-                  meeting.id, meeting.programId, meeting.programName, meeting.programType,
-                  meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
-                  meeting.time, meeting.duration, JSON.stringify(meeting.participants),
-                  meeting.description, meeting.status, meeting.approved ? 1 : 0, now, now
-                );
-              });
-
-              meetingStmt.finalize((err) => {
-                if (err) reject(err);
-                else resolve({ programs: programs.length, meetings: meetings.length });
-              });
+            meetingStmt.finalize((err) => {
+              if (err) reject(err);
+              else resolve({ programs: programs.length, meetings: meetings.length });
             });
           });
         }

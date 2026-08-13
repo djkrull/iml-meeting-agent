@@ -100,7 +100,52 @@ function applyScheduleChange(meetings, key, changes) {
     : m));
 }
 
+// ---------------------------------------------------------------------------
+// Auto-save change detection.
+//
+// The dashboard auto-saves the whole meetings array on every state change, and
+// the backend upserts every row it is handed. That turned ANY state change into
+// a full rewrite of the schedule from whatever this tab happened to hold — so a
+// tab left open from before an edit faithfully re-inserted its stale rows.
+//
+// It bit us on 2026-08-13: the 30s approval poll found new director responses,
+// updated `meetings` so the cards could render them, and the auto-save pushed
+// four rows that had just been deleted server-side straight back into
+// program_meetings. The user had two dashboard windows open; neither had touched
+// the schedule.
+//
+// The fix is to send only rows whose PERSISTED fields actually changed against
+// what the server is known to hold. Approval-derived fields (approved,
+// approvals, adminApprovals, approvedCount, rejectedCount, reviewMeetingId) are
+// deliberately excluded: they are re-derived from the review on every refresh,
+// so including them would make that read-only poll trigger a write again. The
+// admin's own approve/schedule toggles all move `status` as well, so deliberate
+// changes still persist.
+
+function scheduleSignature(m) {
+  const date = m.date instanceof Date ? m.date : new Date(m.date);
+  return JSON.stringify([
+    m.id, m.programId, m.programName, m.programType, m.programYear,
+    m.programOrganizer, m.type, date.toISOString(), m.time, m.duration,
+    m.participants, m.description, m.status,
+  ]);
+}
+
+// What the server is believed to hold: meetingKey -> signature.
+function snapshotSchedule(meetings) {
+  const snap = new Map();
+  (meetings || []).forEach(m => snap.set(meetingKey(m), scheduleSignature(m)));
+  return snap;
+}
+
+// Rows to actually send. A row is "changed" when the server has nothing under
+// its identity (new, or moved to a new date/time) or holds a different value.
+function changedMeetings(meetings, snapshot) {
+  return (meetings || []).filter(m => snapshot.get(meetingKey(m)) !== scheduleSignature(m));
+}
+
 module.exports = {
   localDateKey, dateFromKey, meetingKey, isSameMeeting,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
+  scheduleSignature, snapshotSchedule, changedMeetings,
 };

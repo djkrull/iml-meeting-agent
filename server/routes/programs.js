@@ -71,6 +71,24 @@ router.post('/replace-meetings', async (req, res) => {
   }
 });
 
+// Move one meeting to a new date/time. The plain save only upserts, so a date
+// change would otherwise insert a second row and orphan the old one under the
+// (program_name, type, date) unique constraint.
+router.post('/move-meeting', async (req, res) => {
+  try {
+    const { programName, type, fromDate, toDate, time } = req.body;
+    if (!programName || !type || !fromDate || !toDate) {
+      return res.status(400).json({ error: 'programName, type, fromDate and toDate are required' });
+    }
+    const result = await dbHelpers.moveMeeting({ programName, type, fromDate, toDate, time });
+    console.log(`[MOVE] ${type} / ${programName}: ${fromDate} -> ${toDate} (${result.moved} row(s))`);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error moving meeting:', error);
+    res.status(500).json({ error: 'Failed to move meeting', details: error.message });
+  }
+});
+
 // Get all programs and meetings
 router.get('/', async (req, res) => {
   try {

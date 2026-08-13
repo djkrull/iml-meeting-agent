@@ -8,6 +8,7 @@ import { createIsClosed } from '../utils/swedishHolidays';
 import {
   localDateKey, dateFromKey, meetingKey,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
+  scheduleSignature, snapshotSchedule, changedMeetings,
 } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
@@ -229,6 +230,12 @@ const MeetingAgent = () => {
   // overwrites local state mid-save (which could drop a just-made edit).
   const savingRef = useRef(false);
 
+  // What the server is believed to hold: meetingKey -> scheduleSignature.
+  // The auto-save sends only rows that differ from this, so a tab can never
+  // write back rows it did not touch. See meetingIdentity for the incident.
+  const serverScheduleRef = useRef(new Map());
+  const savedProgramsRef = useRef(null);
+
   // Load programs and meetings from backend on component mount
   useEffect(() => {
     const loadFromBackend = async () => {
@@ -255,6 +262,11 @@ const MeetingAgent = () => {
               ...m,
               date: new Date(m.date)
             }));
+
+            // Record what the server holds, so the first auto-save doesn't
+            // re-POST the whole schedule we just read back to it.
+            serverScheduleRef.current = snapshotSchedule(meetingsWithDates);
+            savedProgramsRef.current = JSON.stringify(programsWithDates);
 
             setPrograms(programsWithDates);
             setMeetings(meetingsWithDates);
@@ -423,7 +435,8 @@ const MeetingAgent = () => {
 
         setMeetings(currentMeetings => {
           let changed = false;
-          const next = currentMeetings.map(meeting => {
+          const next = [];
+          currentMeetings.forEach(meeting => {
             const fresh = data.meetings.find(m => {
               if (m.programName !== meeting.programName || m.type !== meeting.type) return false;
               if (meeting.programName === 'All Summer Conferences') {
@@ -432,16 +445,35 @@ const MeetingAgent = () => {
               }
               return true;
             });
-            if (!fresh) return meeting;
+
+            if (!fresh) {
+              // The server has no meeting of this program+type at all. Drop it —
+              // but only when we know the server once held this exact row, so an
+              // unsaved local edit is never thrown away. Otherwise the card lives
+              // on as a phantom that no reload would ever clear.
+              const known = serverScheduleRef.current.get(meetingKey(meeting));
+              if (known !== undefined && known === scheduleSignature(meeting)) {
+                serverScheduleRef.current.delete(meetingKey(meeting));
+                changed = true;
+                return; // deleted server-side
+              }
+              next.push(meeting);
+              return;
+            }
 
             const freshMs = new Date(fresh.date).getTime();
             const curMs = (meeting.date instanceof Date ? meeting.date : new Date(meeting.date)).getTime();
             if (meeting.time === fresh.time && meeting.duration === fresh.duration && curMs === freshMs) {
-              return meeting; // already up to date
+              next.push(meeting); // already up to date
+              return;
             }
 
             changed = true;
-            return { ...meeting, time: fresh.time, duration: fresh.duration, date: new Date(fresh.date) };
+            const synced = { ...meeting, time: fresh.time, duration: fresh.duration, date: new Date(fresh.date) };
+            // This value came FROM the server, so it must not look dirty to the
+            // auto-save — otherwise every focus would echo it straight back.
+            serverScheduleRef.current.set(meetingKey(synced), scheduleSignature(synced));
+            next.push(synced);
           });
 
           return changed ? next : currentMeetings;
@@ -460,26 +492,44 @@ const MeetingAgent = () => {
     };
   }, [initialLoadComplete]);
 
-  // Save programs and meetings to backend whenever they change
+  // Save programs and meetings to backend whenever they change.
+  //
+  // Sends ONLY the rows that actually differ from what the server is known to
+  // hold. The backend upserts everything it is handed and never deletes, so
+  // POSTing the full array made every state change a full rewrite of the
+  // schedule from this tab's copy — and a tab left open from before an edit
+  // would re-insert its stale rows. That is exactly how four deleted meetings
+  // came back on 2026-08-13: the read-only 30s approval poll updated `meetings`
+  // for rendering and this effect pushed the whole stale array. See
+  // meetingIdentity/changedMeetings.
   useEffect(() => {
     const saveToBackend = async () => {
       if (!initialLoadComplete) return; // Don't save during initial load
       if (programs.length === 0 && meetings.length === 0) return;
 
+      const dirtyMeetings = changedMeetings(meetings, serverScheduleRef.current);
+      const programsJson = JSON.stringify(programs);
+      const programsChanged = programsJson !== savedProgramsRef.current;
+      if (dirtyMeetings.length === 0 && !programsChanged) return; // nothing to write
+
       savingRef.current = true;
       try {
-        console.log('Saving to backend...');
+        console.log(`Saving to backend: ${dirtyMeetings.length} changed meeting(s)` +
+          `${programsChanged ? ', programs changed' : ''}`);
         const response = await fetch(`${API_URL}/api/programs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             programs,
-            meetings
+            meetings: dirtyMeetings
           })
         });
 
         if (response.ok) {
           const data = await response.json();
+          // The server now holds these rows; stop treating them as dirty.
+          dirtyMeetings.forEach(m => serverScheduleRef.current.set(meetingKey(m), scheduleSignature(m)));
+          savedProgramsRef.current = programsJson;
           console.log('Saved to backend:', data);
         } else {
           const errorBody = await response.text();
@@ -1040,6 +1090,9 @@ const MeetingAgent = () => {
         body: JSON.stringify({ meetings: regenPreview.futureMeetings })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // The replace endpoint just wrote exactly this set — record it so the
+      // auto-save doesn't immediately POST the whole schedule back.
+      serverScheduleRef.current = snapshotSchedule(regenPreview.finalMeetings);
       setMeetings(regenPreview.finalMeetings);
       setRegenPreview(null);
     } catch (e) {
@@ -1163,7 +1216,38 @@ const MeetingAgent = () => {
     if (!next) return; // nothing actually changed — don't trigger a save
 
     const key = meetingKey(meeting); // identity BEFORE the edit
+    const from = meeting.date instanceof Date ? meeting.date : new Date(meeting.date);
     setMeetings(prev => applyScheduleChange(prev, key, next));
+
+    // A date change must MOVE the row. The plain save only upserts, and the
+    // unique constraint is (program_name, type, date), so the old row would
+    // otherwise survive as a duplicate reusing the same meeting_id — one per
+    // date edit. That is the duplicate the editor fix alone did NOT solve.
+    if (from.getTime() !== next.date.getTime()) {
+      try {
+        const res = await fetch(`${API_URL}/api/programs/move-meeting`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            programName: meeting.programName,
+            type: meeting.type,
+            fromDate: from.toISOString(),
+            toDate: next.date.toISOString(),
+            time: next.time
+          })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const moved = await res.json();
+        // The move already wrote the row at its new date; drop the old identity
+        // so the auto-save doesn't treat it as still living on the server.
+        serverScheduleRef.current.delete(key);
+        console.log(`Moved ${meeting.type} to ${localDateKey(next.date)} (${moved.moved} row(s))`);
+      } catch (err) {
+        console.error('Failed to move meeting:', err);
+        alert('⚠️ Kunde inte flytta mötet i databasen (' + err.message + ').\n\n' +
+          'Det gamla datumet kan ligga kvar som en dubblett. Ladda om sidan och kontrollera.');
+      }
+    }
 
     // Sync to review if exists
     await syncMeetingToReview(meeting, { date: next.date.toISOString(), time: next.time });
@@ -1848,6 +1932,10 @@ const MeetingAgent = () => {
             ...m,
             date: new Date(m.date)
           }));
+
+          // Freshly read from the server — nothing to write back.
+          serverScheduleRef.current = snapshotSchedule(meetingsWithDates);
+          savedProgramsRef.current = JSON.stringify(programsWithDates);
 
           setPrograms(programsWithDates);
           setMeetings(meetingsWithDates);

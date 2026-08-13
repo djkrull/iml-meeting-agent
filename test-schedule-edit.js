@@ -20,6 +20,7 @@
 
 const {
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
+  scheduleSignature, snapshotSchedule, changedMeetings,
   meetingKey, localDateKey,
 } = require('./src/utils/meetingIdentity');
 
@@ -116,6 +117,73 @@ ok('both rows share one id', withDuplicate[0].id === withDuplicate[1].id);
 const targeted = applyScheduleChange(withDuplicate, meetingKey(withDuplicate[1]), { date: new Date(2026, 8, 15), time: '14:30' });
 eq('the stale row is left alone', localDateKey(targeted[0].date), '2026-08-14');
 eq('only the targeted row moved', localDateKey(targeted[1].date), '2026-09-15');
+
+// ---------------------------------------------------------------------------
+// The auto-save used to POST the whole meetings array, and the backend upserts
+// everything it is handed. So any state change rewrote the schedule from this
+// tab's copy — and a tab open from before an edit re-inserted its stale rows.
+// On 2026-08-13 the read-only 30s approval poll did exactly that: it updated
+// `meetings` so the cards could show new director responses, and four rows that
+// had just been deleted server-side came straight back.
+console.log('\n=== An approval-only refresh must not look like a change ===');
+
+const live = [
+  { id: 16, programName: 'Quantum Fields, Probability, and Geometry', type: 'Check-in meeting with organizers',
+    date: new Date(2026, 8, 15), time: '14:00', duration: 30, participants: ['Directors'],
+    description: 'Review preparations', status: 'pending' },
+  { id: 29, programName: 'Subelliptic and Magnetic Operators', type: 'Introduction Meeting',
+    date: new Date(2026, 8, 18), time: '10:00', duration: 30, participants: ['Directors'],
+    description: 'Initial planning', status: 'pending' },
+];
+const known = snapshotSchedule(live);
+
+eq('a freshly loaded schedule has nothing to save', changedMeetings(live, known).length, 0);
+
+// What the 30s poll produces: approval fields merged in, schedule untouched.
+const polled = live.map(m => ({
+  ...m, approvals: [{ director_name: 'Hans', status: 'accepted' }], adminApprovals: [],
+  approvedCount: 2, rejectedCount: 0, approved: true, reviewMeetingId: 1438,
+}));
+eq('approval fields do not make a row dirty', changedMeetings(polled, known).length, 0);
+
+console.log('\n=== Real edits still save, and only the edited row ===');
+const movedRow = { ...live[0], date: new Date(2026, 8, 22) };
+const afterMove = [movedRow, live[1]];
+const dirtyMove = changedMeetings(afterMove, known);
+eq('a moved meeting is dirty', dirtyMove.length, 1);
+eq('...and it is the one that moved', dirtyMove[0].type, 'Check-in meeting with organizers');
+
+const retimed = [{ ...live[0], time: '15:00' }, live[1]];
+eq('a time change is dirty', changedMeetings(retimed, known).length, 1);
+
+const rescheduled = [{ ...live[0], status: 'scheduled' }, live[1]];
+eq('a status change is dirty', changedMeetings(rescheduled, known).length, 1);
+
+const redescribed = [{ ...live[0], description: 'New text' }, live[1]];
+eq('a description change is dirty', changedMeetings(redescribed, known).length, 1);
+
+const added = live.concat([{ id: 99, programName: 'Triangulated Categories', type: 'Mid-term meeting',
+  date: new Date(2027, 2, 5), time: '14:00', duration: 30, participants: [], description: '', status: 'pending' }]);
+const dirtyAdd = changedMeetings(added, known);
+eq('a brand-new meeting is dirty', dirtyAdd.length, 1);
+eq('...and only it', dirtyAdd[0].type, 'Mid-term meeting');
+
+console.log('\n=== The exact resurrection: a stale tab writes nothing ===');
+// The stale tab still holds the pre-cleanup rows. Its snapshot matches its own
+// state (it has saved nothing since), so however often the approval poll fires,
+// the diff is empty and those rows can never be pushed back.
+const staleTab = [
+  { ...live[0], date: new Date(2026, 7, 14) },  // 14 Aug — deleted server-side
+  { ...live[1], date: new Date(2026, 7, 21) },  // 21 Aug — deleted server-side
+];
+const staleKnown = snapshotSchedule(staleTab);
+const stalePolled = staleTab.map(m => ({ ...m, approvals: [{ x: 1 }], approvedCount: 2, approved: true }));
+eq('the stale tab has nothing to write', changedMeetings(stalePolled, staleKnown).length, 0);
+
+console.log('\n=== Signature ignores Date-vs-string for the same instant ===');
+const asString = { ...live[0], date: live[0].date.toISOString() };
+ok('a Date and its ISO string sign identically',
+  scheduleSignature(asString) === scheduleSignature(live[0]));
 
 // ---------------------------------------------------------------------------
 console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
