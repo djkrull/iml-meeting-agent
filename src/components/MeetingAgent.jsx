@@ -5,11 +5,144 @@ import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, cl
 import SettingsPanel from './Settings';
 import { resolveMeetingDate } from '../utils/meetingRuleEngine';
 import { createIsClosed } from '../utils/swedishHolidays';
-import { localDateKey, dateFromKey, meetingKey } from '../utils/meetingIdentity';
+import {
+  localDateKey, dateFromKey, meetingKey,
+  isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
+} from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+
+// Inline date/time editor for one meeting in the timeline.
+//
+// Everything typed lives in LOCAL draft state and is committed in a single
+// update when editing ends (Spara / Enter / focus leaving the editor). Escape
+// discards. Committing on every keystroke — what this used to do — made the
+// fields unusable:
+//
+//  1. Each partial value went straight into `meetings`, and `filteredMeetings`
+//     re-sorts by date. React then MOVED the card's DOM node, which blurs the
+//     focused <input> and slams the native date picker shut mid-click.
+//  2. `filteredMeetings` also drops meetings before today. Typing a year digit
+//     by digit passes through 0002/0020/0202, all in the past, so the card —
+//     and the editor inside it — unmounted before the year was finished.
+//  3. Every keystroke POSTed the whole schedule. The upsert key is
+//     (program_name, type, date), so each half-typed date left a permanent
+//     duplicate row behind.
+//
+// Draft state keeps `meetings` untouched while typing: nothing re-sorts,
+// nothing unmounts, nothing is written until the value is complete and valid.
+const MeetingScheduleEditor = ({ meeting, onCommit, onCancel }) => {
+  const initialDate = localDateKey(meeting.date);
+  const initialTime = meeting.time || '';
+  const [dateDraft, setDateDraft] = useState(initialDate);
+  const [timeDraft, setTimeDraft] = useState(initialTime);
+  const dateInputRef = useRef(null);
+  const doneRef = useRef(false); // commit/cancel exactly once, whichever fires first
+
+  useEffect(() => {
+    if (dateInputRef.current) dateInputRef.current.focus();
+  }, []);
+
+  const dateValid = isCompleteDateKey(dateDraft);
+  const parsedDate = dateValid ? dateFromKey(dateDraft) : null;
+  const timeValid = /^\d{2}:\d{2}$/.test(timeDraft);
+  const canSave = dateValid && timeValid;
+  const dirty = dateDraft !== initialDate || timeDraft !== initialTime;
+
+  const cancel = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onCancel();
+  };
+
+  const commit = () => {
+    if (doneRef.current) return;
+    if (!canSave || !dirty) return cancel();
+    doneRef.current = true;
+    onCommit({ date: parsedDate, time: timeDraft });
+  };
+
+  // Focus leaving the editor entirely saves; moving between its own fields and
+  // buttons must not. relatedTarget is null when focus goes nowhere (a click on
+  // plain background), which counts as leaving.
+  const handleBlur = (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    commit();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+  };
+
+  // Buttons keep focus in the field they were clicked from, so the container
+  // never sees a blur it would treat as "user left the editor".
+  const keepFocus = (e) => e.preventDefault();
+
+  return (
+    <div
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      className="mb-3 p-3 border border-indigo-200 bg-indigo-50 rounded-lg"
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center text-gray-700">
+          <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={dateDraft}
+            onChange={(e) => setDateDraft(e.target.value)}
+            className={`text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+              dateValid ? 'border-gray-300' : 'border-red-400'
+            }`}
+          />
+        </label>
+        <label className="flex items-center text-gray-700">
+          <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
+          <input
+            type="time"
+            value={timeDraft}
+            onChange={(e) => setTimeDraft(e.target.value)}
+            className={`text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+              timeValid ? 'border-gray-300' : 'border-red-400'
+            }`}
+          />
+        </label>
+        <span className="text-sm text-gray-500">({meeting.duration} min)</span>
+        <div className="flex items-center gap-2 ml-auto">
+          <button
+            onMouseDown={keepFocus}
+            onClick={commit}
+            disabled={!canSave}
+            className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Spara
+          </button>
+          <button
+            onMouseDown={keepFocus}
+            onClick={cancel}
+            className="text-sm bg-white text-gray-700 border border-gray-300 px-3 py-1 rounded hover:bg-gray-100 transition"
+          >
+            Avbryt
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-gray-500 mt-2">
+        {canSave
+          ? 'Ändringen sparas när du klickar Spara, trycker Enter eller klickar utanför. Esc ångrar.'
+          : 'Skriv klart datum och tid — inget sparas förrän värdet är komplett.'}
+      </p>
+    </div>
+  );
+};
 
 const MeetingAgent = () => {
   // State management
@@ -83,7 +216,7 @@ const MeetingAgent = () => {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [programDropdownOpen]);
-  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [editingScheduleKey, setEditingScheduleKey] = useState(null); // meetingKey of the card whose date/time is open for editing
   const [isDragging, setIsDragging] = useState(false);
   const [reviewUrl, setReviewUrl] = useState(null);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -1014,42 +1147,26 @@ const MeetingAgent = () => {
     }
   };
 
-  // Update meeting date. The key is captured BEFORE the map — the meeting's own
-  // identity changes as soon as its date does.
-  const updateMeetingDate = async (meeting, newDate) => {
-    const dateObj = new Date(newDate);
-    const key = meetingKey(meeting);
-    setMeetings(meetings.map(m =>
-      meetingKey(m) === key
-        ? { ...m, date: dateObj }
-        : m
-    ));
+  // Commit a date and/or time change for one meeting as ONE state update.
+  //
+  // Date AND time both belong to the meeting's identity (meetingKey), so writing
+  // them in two passes would leave the second pass matching a key that no longer
+  // exists — the time silently lost. The key is captured BEFORE the map for the
+  // same reason: the meeting's own identity changes as soon as its date does.
+  //
+  // Called once, when the inline editor closes — never per keystroke. Every call
+  // triggers the meetings auto-save, and that INSERTs a program_meetings row for
+  // whatever date it is handed (the unique constraint is program_name+type+date),
+  // so a per-keystroke commit wrote one junk row per half-typed date.
+  const updateMeetingSchedule = async (meeting, { date, time }) => {
+    const next = resolveScheduleChange(meeting, { date, time });
+    if (!next) return; // nothing actually changed — don't trigger a save
+
+    const key = meetingKey(meeting); // identity BEFORE the edit
+    setMeetings(prev => applyScheduleChange(prev, key, next));
 
     // Sync to review if exists
-    await syncMeetingToReview(meeting, { date: dateObj.toISOString() });
-  };
-
-  // Update meeting time
-  const updateMeetingTime = async (meeting, newTime) => {
-    const key = meetingKey(meeting);
-    setMeetings(meetings.map(m =>
-      meetingKey(m) === key
-        ? { ...m, time: newTime }
-        : m
-    ));
-
-    // Sync to review if exists
-    await syncMeetingToReview(meeting, { time: newTime });
-  };
-
-  // Format date for input field (YYYY-MM-DD)
-  const formatDateForInput = (date) => {
-    if (!date) return '';
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    await syncMeetingToReview(meeting, { date: next.date.toISOString(), time: next.time });
   };
 
   // Export to Excel for Outlook import
@@ -2841,9 +2958,14 @@ const MeetingAgent = () => {
                 })()}
                 {filteredMeetings.map(meeting => {
                   const isConflict = isConflictingMeeting(meeting);
+                  // Key on the meeting's identity, not its id: ids are NOT unique
+                  // (see utils/meetingIdentity), and duplicate React keys make the
+                  // reconciler reuse the wrong card — including the open editor.
+                  const key = meetingKey(meeting);
+                  const isEditing = editingScheduleKey === key;
                   return (
                   <div
-                    key={meeting.id}
+                    key={key}
                     className={`border-l-4 p-4 rounded-r-lg transition ${
                       isConflict
                         ? 'border-red-600 bg-red-100 shadow-lg'
@@ -2888,62 +3010,44 @@ const MeetingAgent = () => {
                           )}
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                          <div className="flex items-center text-gray-700">
-                            <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
-                            {editingMeeting === meeting.id ? (
-                              <input
-                                type="date"
-                                value={formatDateForInput(meeting.date)}
-                                onChange={(e) => updateMeetingDate(meeting, e.target.value)}
-                                className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                              />
-                            ) : (
+                        {isEditing ? (
+                          <MeetingScheduleEditor
+                            meeting={meeting}
+                            onCommit={(next) => {
+                              setEditingScheduleKey(null);
+                              updateMeetingSchedule(meeting, next);
+                            }}
+                            onCancel={() => setEditingScheduleKey(null)}
+                          />
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                            <div className="flex items-center text-gray-700">
+                              <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
                               <div className="flex items-center gap-2">
                                 <span className="text-sm">{formatDate(meeting.date)}</span>
                                 <button
-                                  onClick={() => setEditingMeeting(meeting.id)}
+                                  onClick={() => setEditingScheduleKey(key)}
                                   className="text-indigo-600 hover:text-indigo-800"
-                                  title="Edit date/time"
+                                  title="Ändra datum/tid"
                                 >
                                   <Edit2 className="w-3 h-3" />
                                 </button>
                               </div>
-                            )}
-                          </div>
-                          <div className="flex items-center text-gray-700">
-                            <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
-                            {editingMeeting === meeting.id ? (
-                              <input
-                                type="time"
-                                value={meeting.time}
-                                onChange={(e) => updateMeetingTime(meeting, e.target.value)}
-                                className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                              />
-                            ) : (
+                            </div>
+                            <div className="flex items-center text-gray-700">
+                              <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
                               <span className="text-sm">{meeting.time} ({meeting.duration} min)</span>
-                            )}
-                          </div>
-                          <div className="flex items-center text-gray-700">
-                            <Users className="w-4 h-4 mr-2" />
-                            <span className="text-sm">{meeting.participants.length} participants</span>
-                          </div>
-                        </div>
-
-                        {editingMeeting === meeting.id && (
-                          <div className="mb-3">
-                            <button
-                              onClick={() => setEditingMeeting(null)}
-                              className="text-sm bg-indigo-100 text-indigo-800 px-3 py-1 rounded hover:bg-indigo-200 transition"
-                            >
-                              Done Editing
-                            </button>
+                            </div>
+                            <div className="flex items-center text-gray-700">
+                              <Users className="w-4 h-4 mr-2" />
+                              <span className="text-sm">{meeting.participants.length} participants</span>
+                            </div>
                           </div>
                         )}
 
                         {/* Description with Edit capability */}
                         <div className="mb-2">
-                          {editingMeetingKey === meetingKey(meeting) ? (
+                          {editingMeetingKey === key ? (
                             <div className="flex gap-2 items-start">
                               <textarea
                                 value={editedDescription}

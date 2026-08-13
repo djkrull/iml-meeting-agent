@@ -72,6 +72,21 @@ Changing a meeting's date INSERTS a new `program_meetings` row (the unique const
 
 Use [src/utils/meetingIdentity.js](src/utils/meetingIdentity.js) — `meetingKey(m)` = `program|type|localDate|time`, plus `localDateKey`/`dateFromKey` for the local-day conversion. Regression test: [test-meeting-identity.js](test-meeting-identity.js).
 
+### Inline date/time editing — commit ONCE, never per keystroke (don't regress)
+`MeetingScheduleEditor` in [MeetingAgent.jsx](src/components/MeetingAgent.jsx) holds the typed date/time in **local draft state** and commits once, when editing ends (Spara / Enter / focus leaving the editor; Esc discards). It must never write to `meetings` on `onChange`. The old per-keystroke version was unusable *and* corrupted production (fixed 2026-08):
+
+- **The field lost focus mid-typing.** Every partial value went into `meetings`; `filteredMeetings` re-sorts by date, so React *moved* the card's DOM node, which blurs the focused `<input>` and slams the native date picker shut before you can finish clicking.
+- **The editor unmounted mid-typing.** `filteredMeetings` also drops meetings before today. A year typed digit by digit passes through `0002`/`0020`/`0202` — all in the past — so the whole card disappeared before the year was done.
+- **Junk rows in `program_meetings`.** Each keystroke POSTed the schedule, and the upsert key is `(program_name, type, date)`, so every half-typed date became a permanent row reusing the same `meeting_id`. Six had to be cleaned out of production — e.g. Quantum Fields "Check-in meeting junior fellows" existed on 14 Aug / 1 Sep / 14 Sep / 15 Sep, the middle two being nothing but the keystrokes between "14" and "15".
+- **`new Date('YYYY-MM-DD')` parses as UTC midnight**, so editor-written rows landed at 02:00 Stockholm while rule-engine rows sit at local midnight — a handy fingerprint when hunting these rows, and the reason the editor uses `dateFromKey`.
+- Date and time commit **together in one pass** (`applyScheduleChange`). Both are part of `meetingKey`, so writing them separately leaves the second pass matching a key that no longer exists — the second field silently lost.
+- The timeline's React `key` is `meetingKey(meeting)`, **not** `meeting.id`: duplicate keys make the reconciler reuse the wrong card, open editor and all.
+
+Regression test: [test-schedule-edit.js](test-schedule-edit.js).
+
+### `src/utils/*.js` must not use syntax that needs a Babel helper
+These utils are CommonJS so Node tests and CRA share them. Babel lowers **object spread** (`{ ...m }`), `async`/`await` and friends to an `@babel/runtime` helper and **injects an ESM `import`** for it. That flips the file to ESM, `module.exports` stops counting as named exports, and the CRA build fails with `Attempted import error: 'localDateKey' is not exported from '../utils/meetingIdentity'` — pointing at the *importer*, not the real cause. Use `Object.assign({}, a, b)` instead. Plain destructuring is fine under the current browserslist.
+
 Three symptoms this caused on the dashboard (all fixed 2026-08, all traced to the HT2026 duplicate):
 - **Approvals on the wrong card** — the review merge matched on `program_name + type` only and took `.find()`'s first hit, so a moved meeting inherited the *old* date's approvals and displayed "2/2 directors" for answers nobody gave. The merge now also compares the local date.
 - **TIME CONFLICT badge on an unrelated meeting** — `isConflictingMeeting` compared ids; flagging one meeting flagged everything sharing that id. Also `autoResolveConflicts` used `findIndex(m => m.id === ...)` and could move the wrong meeting.
