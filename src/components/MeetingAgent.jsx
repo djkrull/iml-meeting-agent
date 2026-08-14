@@ -125,21 +125,21 @@ const MeetingScheduleEditor = ({ meeting, onCommit, onCancel }) => {
             disabled={!canSave}
             className="text-sm bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Spara
+            Save
           </button>
           <button
             onMouseDown={keepFocus}
             onClick={cancel}
             className="text-sm bg-white text-gray-700 border border-gray-300 px-3 py-1 rounded hover:bg-gray-100 transition"
           >
-            Avbryt
+            Cancel
           </button>
         </div>
       </div>
       <p className="text-xs text-gray-500 mt-2">
         {canSave
-          ? 'Ändringen sparas när du klickar Spara, trycker Enter eller klickar utanför. Esc ångrar.'
-          : 'Skriv klart datum och tid — inget sparas förrän värdet är komplett.'}
+          ? 'Saved when you click Save, press Enter, or click outside. Esc discards.'
+          : 'Finish the date and time — nothing is saved until the value is complete.'}
       </p>
     </div>
   );
@@ -1207,7 +1207,7 @@ const MeetingAgent = () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.updated === 0) {
-        throw new Error('mötet hittades inte i databasen — ladda om sidan');
+        throw new Error('meeting not found in the database — reload the page');
       }
       // Use the server's timestamp so every tab shows the same value.
       setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
@@ -1216,7 +1216,7 @@ const MeetingAgent = () => {
       }) : m));
     } catch (err) {
       console.error('Failed to update invitation status:', err);
-      alert('⚠️ Kunde inte spara utskicksstatusen (' + err.message + ').\n\nLadda om sidan och försök igen.');
+      alert('⚠️ Could not save the invitation status (' + err.message + ').\n\nReload the page and try again.');
       // Roll back so the badge never claims something the database doesn't hold.
       setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
         invitationSentAt: meeting.invitationSentAt || null,
@@ -1311,8 +1311,8 @@ const MeetingAgent = () => {
         console.log(`Moved ${meeting.type} to ${localDateKey(next.date)} (${moved.moved} row(s))`);
       } catch (err) {
         console.error('Failed to move meeting:', err);
-        alert('⚠️ Kunde inte flytta mötet i databasen (' + err.message + ').\n\n' +
-          'Det gamla datumet kan ligga kvar som en dubblett. Ladda om sidan och kontrollera.');
+        alert('⚠️ Could not move the meeting in the database (' + err.message + ').\n\n' +
+          'The old date may remain as a duplicate. Reload the page and check.');
       }
     }
 
@@ -2681,11 +2681,11 @@ const MeetingAgent = () => {
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-gray-500 text-sm">Inbjudan skickad</p>
+                    <p className="text-gray-500 text-sm">Invitation Sent</p>
                     <p className="text-3xl font-bold text-indigo-600">{stats.invitationSent}</p>
                     {stats.invitationStale > 0 && (
                       <p className="text-xs font-semibold text-amber-700 mt-1">
-                        {stats.invitationStale} behöver uppdateras
+                        {stats.invitationStale} need updating
                       </p>
                     )}
                   </div>
@@ -2696,7 +2696,7 @@ const MeetingAgent = () => {
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-gray-500 text-sm">Bokad utanför verktyget</p>
+                    <p className="text-gray-500 text-sm">Booked Outside Tool</p>
                     <p className="text-3xl font-bold text-gray-600">{stats.alreadyScheduled}</p>
                   </div>
                   <CheckCircle className="w-12 h-12 text-gray-500" />
@@ -2926,7 +2926,7 @@ const MeetingAgent = () => {
               <button
                 onClick={reloadFromDatabase}
                 className="bg-indigo-100 text-indigo-800 hover:bg-indigo-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                title="Hämtar om schemat från databasen och kastar osparade ändringar i den här fliken. Bra om du misstänker att vyn hunnit bli inaktuell."
+                title="Re-reads the schedule from the database, discarding unsaved changes in this tab. Useful if you suspect this view has gone stale."
               >
                 <RefreshCw className="w-5 h-5" />
                 Reload from Database
@@ -2934,7 +2934,7 @@ const MeetingAgent = () => {
               <button
                 onClick={cleanupCorruptedMeetings}
                 className="bg-red-100 text-red-800 hover:bg-red-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                title="RADERAR program vars NAMN är en platshållare ('Title', 'TBD', 'Unnamed Program') och alla deras möten. Går inte att ångra."
+                title="DELETES programs whose NAME is a placeholder ('Title', 'TBD', 'Unnamed Program') and all of their meetings. Cannot be undone."
               >
                 <X className="w-5 h-5" />
                 Clean Corrupted Meetings
@@ -2942,14 +2942,14 @@ const MeetingAgent = () => {
               <button
                 onClick={removeMyDuplicates}
                 className="bg-purple-100 text-purple-800 hover:bg-purple-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                title="Tar bort dubblerade möten ur den här vyn och ur databasen. Directors granskningsvy påverkas inte."
+                title="Removes duplicate meetings from this view and from the database. The directors review is not affected."
               >
                 <Trash2 className="w-5 h-5" />
                 Remove My Duplicates
               </button>
               <button
                 onClick={shareForReview}
-                title="Skapar en NY granskningsomgång med dagens schema och en länk att skicka till directors. Tidigare svar följer inte med — dela om bara när schemat ändrats i grunden."
+                title="Creates a NEW review round from the current schedule, with a link to send to the directors. Earlier responses do NOT carry over — only re-share when the schedule has fundamentally changed."
                 className="bg-orange-100 text-orange-800 hover:bg-orange-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <Share2 className="w-5 h-5" />
@@ -2960,7 +2960,7 @@ const MeetingAgent = () => {
                   <button
                     onClick={syncAllMeetingsToReview}
                     className="bg-blue-100 text-blue-800 hover:bg-blue-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                    title="Skickar alla aktuella datum och tider till directors granskningsvy. Deras befintliga svar ligger kvar — även om tiden ändrats, så kontrollera att svaren fortfarande gäller."
+                    title="Pushes all current dates and times to the directors review. Their existing responses remain — even where the time changed, so check that those responses still apply."
                   >
                     <RefreshCw className="w-5 h-5" />
                     Sync All to Directors
@@ -2968,7 +2968,7 @@ const MeetingAgent = () => {
                   <button
                     onClick={refreshApprovals}
                     className="bg-teal-100 text-teal-800 hover:bg-teal-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                    title="Hämtar directors senaste svar. Läser bara — ändrar ingenting i schemat. (Sker även automatiskt var 30:e sekund.)"
+                    title="Fetches the directors latest responses. Read-only — changes nothing in the schedule. (Also happens automatically every 30 seconds.)"
                   >
                     <RefreshCw className="w-5 h-5" />
                     Refresh Director Attendance
@@ -2976,7 +2976,7 @@ const MeetingAgent = () => {
                   <button
                     onClick={removeDuplicatesFromDirectorView}
                     className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                    title="Tar bort dubblerade möten ur directors granskningsvy. Rör inte schemat och inte deras svar på de möten som blir kvar."
+                    title="Removes duplicate meetings from the directors review. Leaves the schedule alone, and their responses on the remaining meetings."
                   >
                     <Trash2 className="w-5 h-5" />
                     Remove Director Duplicates
@@ -2984,7 +2984,7 @@ const MeetingAgent = () => {
                   <button
                     onClick={openClearModal}
                     className="bg-red-100 text-red-800 hover:bg-red-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
-                    title="RADERAR valda directors svar för ALLA möten i granskningen, så att de kan svara på nytt. Går inte att ångra."
+                    title="DELETES the selected directors responses for ALL meetings in the review, so they can answer again. Cannot be undone."
                   >
                     <Trash2 className="w-5 h-5" />
                     Clear Reviews
@@ -2993,7 +2993,7 @@ const MeetingAgent = () => {
               )}
               <button
                 onClick={approveAll}
-                title="Sätter administrationens godkännande på ALLA möten i listan på en gång. Detta är inte directors svar."
+                title="Applies administrations approval to ALL meetings in the list at once. This is not the directors response."
                 className="bg-gray-100 text-gray-800 hover:bg-gray-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <CheckCircle className="w-5 h-5" />
@@ -3001,7 +3001,7 @@ const MeetingAgent = () => {
               </button>
               <button
                 onClick={exportToICS}
-                title="Laddar ner alla framtida möten som kalenderfil. Ej godkända möten märks PRELIMINÄR i kalendern."
+                title="Downloads all upcoming meetings as a calendar file. Meetings not yet approved are marked PRELIMINÄR in the calendar."
                 className="bg-purple-100 text-purple-800 hover:bg-purple-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <CalendarDays className="w-5 h-5" />
@@ -3009,7 +3009,7 @@ const MeetingAgent = () => {
               </button>
               <button
                 onClick={exportApprovedToICS}
-                title="Laddar ner endast de möten där minst en director tackat ja. Alla märks som bekräftade i kalendern."
+                title="Downloads only the meetings at least one director has accepted. All are marked confirmed in the calendar."
                 className="bg-teal-100 text-teal-800 hover:bg-teal-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <CalendarCheck className="w-5 h-5" />
@@ -3017,7 +3017,7 @@ const MeetingAgent = () => {
               </button>
               <button
                 onClick={exportToExcel}
-                title="Laddar ner de godkända mötena som Excel-fil för import till Outlook."
+                title="Downloads the approved meetings as an Excel file for import into Outlook."
                 className="bg-green-100 text-green-800 hover:bg-green-200 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
               >
                 <Download className="w-5 h-5" />
@@ -3169,10 +3169,10 @@ const MeetingAgent = () => {
                                 invitation.stale ? 'bg-amber-200 text-amber-900' : 'bg-indigo-100 text-indigo-800'
                               }`}
                               title={invitation.sentFor
-                                ? `Inbjudan skickad för ${invitation.sentFor.date}${invitation.sentFor.time ? ' kl ' + invitation.sentFor.time : ''}`
-                                : 'Inbjudan skickad'}
+                                ? `Invitation sent for ${invitation.sentFor.date}${invitation.sentFor.time ? ' at ' + invitation.sentFor.time : ''}`
+                                : 'Invitation sent'}
                             >
-                              {invitation.stale ? '⚠️ Inbjudan behöver uppdateras' : '📨 Inbjudan skickad'}
+                              {invitation.stale ? '⚠️ Invitation needs updating' : '📨 Invitation sent'}
                             </span>
                           )}
                           {meeting.approvals && meeting.approvals.length > 0 && (
@@ -3198,17 +3198,17 @@ const MeetingAgent = () => {
                               <div className="flex items-start gap-2">
                                 <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                                 <span>
-                                  <strong>Mötet har flyttats sedan inbjudan skickades.</strong>{' '}
-                                  Inbjudan gäller {invitation.sentFor.date}
-                                  {invitation.sentFor.time ? ` kl ${invitation.sentFor.time}` : ''} —
-                                  mötet ligger nu {localDateKey(meeting.date)} kl {meeting.time}.
-                                  Uppdatera inbjudan i Outlook och markera om.
+                                  <strong>The meeting has moved since the invitation was sent.</strong>{' '}
+                                  The invitation is for {invitation.sentFor.date}
+                                  {invitation.sentFor.time ? ` at ${invitation.sentFor.time}` : ''} —
+                                  the meeting is now {localDateKey(meeting.date)} at {meeting.time}.
+                                  Update the invitation in Outlook, then mark it again.
                                 </span>
                               </div>
                             ) : (
                               <span>
-                                📨 Inbjudan skickad {formatDateTimeShort(invitation.sentAt)}
-                                {personName(invitation.sentBy) ? ` av ${personName(invitation.sentBy)}` : ''}
+                                📨 Invitation sent {formatDateTimeShort(invitation.sentAt)}
+                                {personName(invitation.sentBy) ? ` by ${personName(invitation.sentBy)}` : ''}
                               </span>
                             )}
                           </div>
@@ -3232,7 +3232,7 @@ const MeetingAgent = () => {
                                 <button
                                   onClick={() => setEditingScheduleKey(key)}
                                   className="text-indigo-600 hover:text-indigo-800"
-                                  title="Ändra datum och tid. Ändringen sparas först när du klickar Spara eller trycker Enter — inget skrivs medan du skriver."
+                                  title="Change the date and time. Nothing is saved until you click Save or press Enter — nothing is written while you type."
                                 >
                                   <Edit2 className="w-3 h-3" />
                                 </button>
@@ -3262,14 +3262,14 @@ const MeetingAgent = () => {
                               <button
                                 onClick={() => saveDescription(meeting)}
                                 className="px-3 py-2 bg-green-100 text-green-800 rounded-lg hover:bg-green-200 transition"
-                                title="Spara beskrivningen"
+                                title="Save the description"
                               >
                                 <Save className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={cancelEditing}
                                 className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition"
-                                title="Avbryt utan att spara"
+                                title="Cancel without saving"
                               >
                                 <X className="w-4 h-4" />
                               </button>
@@ -3280,7 +3280,7 @@ const MeetingAgent = () => {
                               <button
                                 onClick={() => startEditing(meeting)}
                                 className="text-indigo-600 hover:text-indigo-800 transition flex-shrink-0"
-                                title="Ändra beskrivningen som directors och organisatörer ser"
+                                title="Edit the description that directors and organizers see"
                               >
                                 <Edit2 className="w-3 h-3" />
                               </button>
@@ -3364,7 +3364,7 @@ const MeetingAgent = () => {
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   onClick={() => recordAdminAttendance(meeting, 'accepted')}
-                                  title="Markera att DU deltar. Detta räknas som närvaro, inte som ett godkännande — det påverkar aldrig directors-räknaren."
+                                  title="Record that YOU are attending. This counts as attendance, not approval — it never affects the director count."
                                   className={`text-xs px-3 py-1 rounded-full transition ${
                                     isAttending
                                       ? 'bg-green-600 text-white'
@@ -3375,7 +3375,7 @@ const MeetingAgent = () => {
                                 </button>
                                 <button
                                   onClick={() => recordAdminAttendance(meeting, 'declined')}
-                                  title="Markera att du INTE kan delta. Mötet blir inte avbokat — det gäller bara din egen närvaro."
+                                  title="Record that you CANNOT attend. The meeting is not cancelled — this is only your own attendance."
                                   className={`text-xs px-3 py-1 rounded-full transition ${
                                     isDeclined
                                       ? 'bg-red-600 text-white'
@@ -3387,7 +3387,7 @@ const MeetingAgent = () => {
                                 {mine && (
                                   <button
                                     onClick={() => recordAdminAttendance(meeting, 'clear')}
-                                    title="Ta bort ditt svar helt, så att din närvaro står som obesvarad igen."
+                                    title="Remove your response entirely, so your attendance is unanswered again."
                                     className="text-xs px-3 py-1 rounded-full bg-white text-gray-600 border border-gray-300 hover:bg-gray-100 transition"
                                   >
                                     Clear
@@ -3403,12 +3403,12 @@ const MeetingAgent = () => {
                         {meeting.status === 'already-scheduled' ? (
                           <>
                             <div className="px-4 py-2 rounded-lg font-medium bg-gray-400 text-white text-center">
-                              Bokad utanför verktyget
+                              Booked Outside Tool
                             </div>
                             <button
                               onClick={() => toggleAlreadyScheduled(meeting)}
                               className="px-4 py-2 rounded-lg font-medium bg-orange-100 text-orange-800 hover:bg-orange-200 transition text-sm"
-                              title="Ta tillbaka mötet till planeringen. Det syns då i directors granskningslänk igen."
+                              title="Bring the meeting back into planning. It reappears in the directors review link."
                             >
                               Undo
                             </button>
@@ -3423,8 +3423,8 @@ const MeetingAgent = () => {
                                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                               }`}
                               title={meeting.approved
-                                ? 'Administrationen har godkänt tid och datum. Klicka för att ta tillbaka godkännandet. Directors svar påverkas inte.'
-                                : 'Administrationens eget godkännande av tid och datum. Detta är inte directors svar — de svarar själva via granskningslänken.'}
+                                ? 'Administration has approved this date and time. Click to withdraw the approval. The directors own responses are not affected.'
+                                : 'Administrations own sign-off on the date and time. This is NOT the directors response — they answer for themselves via the review link.'}
                             >
                               {meeting.approved ? 'Approved' : 'Approve'}
                             </button>
@@ -3439,28 +3439,28 @@ const MeetingAgent = () => {
                                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                               }`}
                               title={invitation.stale
-                                ? 'Mötet har flyttats sedan inbjudan skickades. Uppdatera först inbjudan i Outlook — klicka sedan här för att markera om den mot det nya datumet.'
+                                ? 'The meeting has moved since the invitation was sent. Update the invitation in Outlook first, then click here to mark it against the new date.'
                                 : invitation.sent
-                                ? 'Den officiella inbjudan är skickad. Klicka för att ångra — mötet räknas då som ej utskickat igen.'
-                                : 'Markera att du har skickat den officiella inbjudan i Outlook. Datum och tid sparas, så att du varnas om mötet flyttas efteråt.'}
+                                ? 'The official invitation has been sent. Click to undo — the meeting then counts as not sent again.'
+                                : 'Mark that you have sent the official invitation in Outlook. The date and time are recorded, so you are warned if the meeting moves afterwards.'}
                             >
                               <Send className="w-4 h-4" />
-                              {invitation.stale ? 'Markera om' : invitation.sent ? 'Skickad' : 'Inbjudan skickad?'}
+                              {invitation.stale ? 'Mark Again' : invitation.sent ? 'Invitation Sent' : 'Invitation Sent?'}
                             </button>
 
                             <button
                               onClick={() => toggleAlreadyScheduled(meeting)}
                               className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 transition text-sm"
-                              title="Mötet är redan bokat utanför det här verktyget. Det tas då bort från directors granskningslänk och godkännandet nollställs."
+                              title="This meeting is already booked outside this tool. It is then removed from the directors review link and its approval is cleared."
                             >
-                              Bokad utanför verktyget
+                              Booked Outside Tool
                             </button>
 
                             {meeting.approvals && meeting.approvals.length > 0 && currentReviewId && (
                               <button
                                 onClick={() => syncSingleMeeting(meeting, true)}
                                 className="px-4 py-2 rounded-lg font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 transition text-sm flex items-center gap-2"
-                                title="RADERAR directors svar för det här mötet och skickar ut den nya tiden till dem för nytt svar. Använd när tiden ändrats så mycket att de gamla svaren inte längre gäller."
+                                title="DELETES the directors responses for this meeting and pushes the new time to them for a fresh answer. Use when the time has changed enough that the old responses no longer apply."
                               >
                                 <RefreshCw className="w-4 h-4" />
                                 Sync & Clear Approvals

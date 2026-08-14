@@ -491,7 +491,7 @@ const DirectorReviewView = ({ reviewId }) => {
                           <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                             inv.stale ? 'bg-amber-200 text-amber-900' : 'bg-indigo-100 text-indigo-800'
                           }`}>
-                            {inv.stale ? '⚠️ Inbjudan behöver uppdateras' : '📨 Officiell inbjudan skickad'}
+                            {inv.stale ? '⚠️ Invitation needs updating' : '📨 Official invitation sent'}
                           </span>
                         );
                       })()}
@@ -502,9 +502,9 @@ const DirectorReviewView = ({ reviewId }) => {
                       if (!inv.stale) return null;
                       return (
                         <div className="mb-3 text-sm rounded-lg px-3 py-2 bg-amber-100 text-amber-900">
-                          Mötet har flyttats sedan inbjudan skickades — inbjudan gäller{' '}
-                          {inv.sentFor.date}{inv.sentFor.time ? ` kl ${inv.sentFor.time}` : ''}, mötet ligger nu{' '}
-                          {localDateKey(meeting.date)} kl {meeting.time}. Administrationen uppdaterar den.
+                          This meeting has moved since the invitation was sent — the invitation is for{' '}
+                          {inv.sentFor.date}{inv.sentFor.time ? ` at ${inv.sentFor.time}` : ''}, and the meeting is now{' '}
+                          {localDateKey(meeting.date)} at {meeting.time}. Administration will update it.
                         </div>
                       );
                     })()}
