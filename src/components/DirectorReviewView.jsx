@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, MessageSquare, Edit2, Save, X, Download, Info } from 'lucide-react';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
+import { invitationStatus, localDateKey } from '../utils/meetingIdentity';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 const DIRECTOR_IDENTITY_KEY = 'iml-director-identity';
@@ -482,7 +483,31 @@ const DirectorReviewView = ({ reviewId }) => {
                       <span className="text-sm bg-gray-200 px-3 py-1 rounded-full">
                         {meeting.program_name}
                       </span>
+                      {(() => {
+                        // Read-only: administration owns this, directors just see it.
+                        const inv = invitationStatus(meeting);
+                        if (!inv.sent) return null;
+                        return (
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                            inv.stale ? 'bg-amber-200 text-amber-900' : 'bg-indigo-100 text-indigo-800'
+                          }`}>
+                            {inv.stale ? '⚠️ Inbjudan behöver uppdateras' : '📨 Officiell inbjudan skickad'}
+                          </span>
+                        );
+                      })()}
                     </div>
+
+                    {(() => {
+                      const inv = invitationStatus(meeting);
+                      if (!inv.stale) return null;
+                      return (
+                        <div className="mb-3 text-sm rounded-lg px-3 py-2 bg-amber-100 text-amber-900">
+                          Mötet har flyttats sedan inbjudan skickades — inbjudan gäller{' '}
+                          {inv.sentFor.date}{inv.sentFor.time ? ` kl ${inv.sentFor.time}` : ''}, mötet ligger nu{' '}
+                          {localDateKey(meeting.date)} kl {meeting.time}. Administrationen uppdaterar den.
+                        </div>
+                      );
+                    })()}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
                       <div className="flex items-center text-gray-700">

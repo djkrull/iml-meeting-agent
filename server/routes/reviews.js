@@ -113,6 +113,41 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
     const review = await dbHelpers.getReview(id);
 
+    // Invitation status is read live from program_meetings rather than copied
+    // into the review when it was shared — otherwise a review shared before the
+    // invitation went out would show "not sent" forever. Matched on the
+    // Stockholm-local day (the review copy and the schedule row can hold the
+    // same day at different instants; see the UTC-vs-local note in CLAUDE.md).
+    const localDay = (d) => new Date(d).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' });
+    let scheduleRows = [];
+    try {
+      scheduleRows = (await dbHelpers.getPrograms()).meetings || [];
+    } catch (e) {
+      console.error('Could not load invitation status for review:', e.message);
+    }
+    const invitationFor = (meeting) => {
+      const sameMeeting = scheduleRows.filter(m =>
+        m.programName === meeting.program_name && m.type === meeting.type);
+      // Prefer the row on the same Stockholm day. If the meeting was moved after
+      // the review was shared, the two dates disagree — fall back to the schedule
+      // row, but ONLY when it is unambiguous. Showing nothing there would be the
+      // worst outcome: the invitation IS out and is now wrong, which is exactly
+      // what the director needs to see.
+      const row = sameMeeting.find(m => localDay(m.date) === localDay(meeting.date))
+        || (sameMeeting.length === 1 ? sameMeeting[0] : null);
+      if (!row) return {};
+      return {
+        invitationSentAt: row.invitationSentAt || null,
+        invitationSentBy: row.invitationSentBy || null,
+        invitationSentForDate: row.invitationSentForDate || null,
+        invitationSentForTime: row.invitationSentForTime || null,
+        // The schedule's current date/time — what the invitation must be
+        // compared against, since this review row may be lagging behind it.
+        invitationCurrentDate: row.date,
+        invitationCurrentTime: row.time
+      };
+    };
+
     // Calculate approval status for each meeting
     const meetingsWithStatus = review.meetings.map(meeting => {
       // Director approval drives meeting status — admin responses are attendance
@@ -133,6 +168,7 @@ router.get('/:id', async (req, res) => {
 
       return {
         ...meeting,
+        ...invitationFor(meeting),
         overallStatus,
         approvedCount
       };

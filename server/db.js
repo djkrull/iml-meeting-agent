@@ -213,6 +213,30 @@ async function initializePostgresDatabase() {
       console.log('Migration note (program_id):', migrationError.message);
     }
 
+    // Migration: "official invitation sent in Outlook" tracking.
+    //
+    // Deliberately its own set of columns rather than another `status` value:
+    // whether the invitation went out is a fact about the outside world, not
+    // about the internal planning consensus, and the two are independent (a
+    // meeting can be agreed but not yet invited). Folding it into `status`
+    // would make the states mutually exclusive again.
+    //
+    // sent_for_date/time record WHAT was invited, so a later date change can be
+    // detected and flagged — an invitation that silently became wrong is the
+    // real risk in this workflow.
+    try {
+      await pool.query(`
+        ALTER TABLE program_meetings
+        ADD COLUMN IF NOT EXISTS invitation_sent_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS invitation_sent_by TEXT,
+        ADD COLUMN IF NOT EXISTS invitation_sent_for_date TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS invitation_sent_for_time TEXT
+      `);
+      console.log('invitation tracking migration completed');
+    } catch (migrationError) {
+      console.log('Migration note (invitation):', migrationError.message);
+    }
+
     // Migration: Ensure unique CONSTRAINTS exist (not just indexes).
     // ON CONFLICT ON CONSTRAINT requires an actual named CONSTRAINT, not a plain
     // UNIQUE INDEX — this caused silent INSERT failures in production previously.
@@ -327,10 +351,20 @@ function initializeSQLiteDatabase() {
         description TEXT,
         status TEXT DEFAULT 'pending',
         approved INTEGER DEFAULT 0,
+        invitation_sent_at TEXT,
+        invitation_sent_by TEXT,
+        invitation_sent_for_date TEXT,
+        invitation_sent_for_time TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
     `);
+
+    // Same invitation columns for databases created before the feature.
+    // SQLite has no ADD COLUMN IF NOT EXISTS; the error on an existing column
+    // is expected and ignored.
+    ['invitation_sent_at', 'invitation_sent_by', 'invitation_sent_for_date', 'invitation_sent_for_time']
+      .forEach(col => db.run(`ALTER TABLE program_meetings ADD COLUMN ${col} TEXT`, () => {}));
 
     // Same uniqueness as production, so local dev can upsert instead of
     // wipe-and-reinsert. Deduplicate first or the index can't be created.
@@ -482,8 +516,8 @@ const dbHelpers = {
           for (const m of list) {
             const meetingDate = typeof m.date === 'string' ? m.date : m.date.toISOString();
             await client.query(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
                ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
                DO UPDATE SET time = EXCLUDED.time, duration = EXCLUDED.duration,
                  participants = EXCLUDED.participants, description = EXCLUDED.description,
@@ -491,7 +525,9 @@ const dbHelpers = {
                  program_organizer = EXCLUDED.program_organizer, updated_at = EXCLUDED.updated_at`,
               [m.id, m.programId, m.programName, m.programType, m.programYear, m.programOrganizer,
                m.type, meetingDate, m.time, m.duration, JSON.stringify(m.participants),
-               m.description, m.status || 'pending', m.approved || false, now, now]
+               m.description, m.status || 'pending', m.approved || false, now, now,
+               m.invitationSentAt || null, m.invitationSentBy || null,
+               m.invitationSentForDate || null, m.invitationSentForTime || null]
             );
           }
           await client.query('COMMIT');
@@ -509,14 +545,16 @@ const dbHelpers = {
           db.run('DELETE FROM program_meetings WHERE date >= ?', [todayIso], (delErr) => {
             if (delErr) return reject(delErr);
             const stmt = db.prepare(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             list.forEach(m => {
               const meetingDate = typeof m.date === 'string' ? m.date : m.date.toISOString();
               stmt.run(m.id, m.programId, m.programName, m.programType, m.programYear, m.programOrganizer,
                 m.type, meetingDate, m.time, m.duration, JSON.stringify(m.participants),
-                m.description, m.status || 'pending', m.approved ? 1 : 0, now, now);
+                m.description, m.status || 'pending', m.approved ? 1 : 0, now, now,
+                m.invitationSentAt || null, m.invitationSentBy || null,
+                m.invitationSentForDate || null, m.invitationSentForTime || null);
             });
             stmt.finalize((finErr) => finErr ? reject(finErr) : resolve({ replaced: list.length }));
           });
@@ -586,6 +624,53 @@ const dbHelpers = {
             }
           );
         });
+      }
+    });
+  },
+
+  // Mark (or unmark) that the official Outlook invitation has gone out.
+  //
+  // Has its own endpoint rather than riding the meetings auto-save, for the same
+  // reason Settings does: the auto-save is driven by one tab's copy of the whole
+  // schedule, and this is a shared fact that must not be clobbered by a stale
+  // tab. The save's ON CONFLICT deliberately leaves these columns alone.
+  //
+  // When marking, we also record WHICH date/time was invited, so a later change
+  // can be flagged instead of silently leaving an incorrect invitation out there.
+  setInvitationSent: ({ programName, type, date, sent, byId, forTime }) => {
+    return new Promise(async (resolve, reject) => {
+      const now = new Date().toISOString();
+      const sql = USE_POSTGRES
+        ? `UPDATE program_meetings
+              SET invitation_sent_at = $4, invitation_sent_by = $5,
+                  invitation_sent_for_date = $6, invitation_sent_for_time = $7,
+                  updated_at = $8
+            WHERE program_name = $1 AND type = $2 AND date = $3`
+        : `UPDATE program_meetings
+              SET invitation_sent_at = ?, invitation_sent_by = ?,
+                  invitation_sent_for_date = ?, invitation_sent_for_time = ?,
+                  updated_at = ?
+            WHERE program_name = ? AND type = ? AND date = ?`;
+
+      const sentAt = sent ? now : null;
+      const sentBy = sent ? (byId || null) : null;
+      const forDate = sent ? date : null;
+      const forTimeVal = sent ? (forTime || null) : null;
+
+      try {
+        if (USE_POSTGRES) {
+          const res = await pool.query(sql,
+            [programName, type, date, sentAt, sentBy, forDate, forTimeVal, now]);
+          resolve({ updated: res.rowCount, invitationSentAt: sentAt, invitationSentBy: sentBy });
+        } else {
+          db.run(sql, [sentAt, sentBy, forDate, forTimeVal, now, programName, type, date],
+            function (err) {
+              if (err) return reject(err);
+              resolve({ updated: this.changes, invitationSentAt: sentAt, invitationSentBy: sentBy });
+            });
+        }
+      } catch (err) {
+        reject(err);
       }
     });
   },
@@ -1449,8 +1534,8 @@ const dbHelpers = {
 
             try {
               await pool.query(
-                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
                  ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
                  DO UPDATE SET
                    time = EXCLUDED.time,
@@ -1464,7 +1549,9 @@ const dbHelpers = {
                 [meeting.id, meeting.programId, meeting.programName, meeting.programType,
                  meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
                  meeting.time, meeting.duration, JSON.stringify(meeting.participants),
-                 meeting.description, meeting.status, meeting.approved || false, now, now]
+                 meeting.description, meeting.status, meeting.approved || false, now, now,
+                 meeting.invitationSentAt || null, meeting.invitationSentBy || null,
+                 meeting.invitationSentForDate || null, meeting.invitationSentForTime || null]
               );
               meetingsInserted++;
             } catch (err) {
@@ -1515,8 +1602,8 @@ const dbHelpers = {
             programStmt.finalize();
 
             const meetingStmt = db.prepare(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(program_name, type, date) DO UPDATE SET
                  time = excluded.time,
                  duration = excluded.duration,
@@ -1537,7 +1624,9 @@ const dbHelpers = {
                 meeting.id, meeting.programId, meeting.programName, meeting.programType,
                 meeting.programYear, meeting.programOrganizer, meeting.type, meetingDate,
                 meeting.time, meeting.duration, JSON.stringify(meeting.participants),
-                meeting.description, meeting.status, meeting.approved ? 1 : 0, now, now
+                meeting.description, meeting.status, meeting.approved ? 1 : 0, now, now,
+                meeting.invitationSentAt || null, meeting.invitationSentBy || null,
+                meeting.invitationSentForDate || null, meeting.invitationSentForTime || null
               );
             });
 
@@ -1586,7 +1675,11 @@ const dbHelpers = {
             participants: typeof m.participants === 'string' ? JSON.parse(m.participants) : m.participants,
             description: m.description,
             status: m.status,
-            approved: m.approved
+            approved: m.approved,
+            invitationSentAt: m.invitation_sent_at,
+            invitationSentBy: m.invitation_sent_by,
+            invitationSentForDate: m.invitation_sent_for_date,
+            invitationSentForTime: m.invitation_sent_for_time
           }));
 
           resolve({ programs, meetings });
@@ -1625,7 +1718,11 @@ const dbHelpers = {
                     participants: JSON.parse(m.participants),
                     description: m.description,
                     status: m.status,
-                    approved: m.approved === 1
+                    approved: m.approved === 1,
+                    invitationSentAt: m.invitation_sent_at,
+                    invitationSentBy: m.invitation_sent_by,
+                    invitationSentForDate: m.invitation_sent_for_date,
+                    invitationSentForTime: m.invitation_sent_for_time
                   }));
 
                   resolve({ programs, meetings });

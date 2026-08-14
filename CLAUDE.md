@@ -92,6 +92,15 @@ Three symptoms this caused on the dashboard (all fixed 2026-08, all traced to th
 - **TIME CONFLICT badge on an unrelated meeting** — `isConflictingMeeting` compared ids; flagging one meeting flagged everything sharing that id. Also `autoResolveConflicts` used `findIndex(m => m.id === ...)` and could move the wrong meeting.
 - **Dates off by one day** — conflict grouping used `date.toISOString().split('T')[0]`, i.e. the UTC day. A meeting at Stockholm-local midnight stores as 22:00Z (CEST) / 23:00Z (CET) the *previous* day, so Friday 28 Aug rendered as Thursday 27 Aug.
 
+### Official Outlook invitation status
+`program_meetings.invitation_sent_at` / `_by` / `_for_date` / `_for_time`, toggled by `POST /api/programs/invitation` → `dbHelpers.setInvitationSent`. Read via `invitationStatus(m)` in [meetingIdentity.js](src/utils/meetingIdentity.js), shared by the dashboard and the director view.
+
+- **Its own columns, not another `status` value.** Whether the invitation went out is a fact about the outside world, independent of the internal planning consensus — a meeting can be agreed but not invited, or invited and then questioned. Folding it into `status` makes the states mutually exclusive again.
+- **`_for_date`/`_for_time` record WHAT was invited.** If the meeting moves afterwards, the invitation sitting in people's calendars is now wrong — `invitationStatus` reports `stale` and the card turns amber. That silent-wrong-invitation case is the whole point; never let a moved meeting keep a plain green tick.
+- **Its own endpoint, never the meetings auto-save**, and deliberately **excluded from `scheduleSignature`** — otherwise a stale tab could clobber a shared fact. `savePrograms`' `ON CONFLICT DO UPDATE` leaves these columns alone, but every INSERT path (`savePrograms`, `replaceFutureMeetings`) carries them, or "Regenerera" would wipe the status.
+- **Directors see it read-only**, enriched live in `GET /api/reviews/:id` from `program_meetings` rather than copied into the review — a review shared before the invitation went out would otherwise show "not sent" forever. Matched on the Stockholm-local day, falling back to `(program_name, type)` when that is unambiguous, and the route also sends `invitationCurrentDate`/`Time`: the per-review copy can lag behind the schedule, and comparing against the copy would report "not changed" for a meeting that has in fact moved.
+- `Mark Scheduled` / `status='scheduled'` are **gone** (they were unused — 0 rows in production — and overlapped this). `Already Scheduled` remains, relabelled "Bokad utanför verktyget": it means booked outside this tool, clears `approved`, and hides the meeting from the director review.
+
 ### Regenerate
 "Regenerera" on the dashboard recomputes future meeting dates from current rules, shows a diff, and applies via `POST /api/programs/replace-meetings` — a **transactional delete-future-then-insert** so a date-shifted meeting can't leave a stale duplicate under the `(program_name, type, date)` unique constraint. Past meetings are preserved.
 

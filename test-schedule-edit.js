@@ -20,7 +20,7 @@
 
 const {
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
-  scheduleSignature, snapshotSchedule, changedMeetings,
+  scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus,
   meetingKey, localDateKey,
 } = require('./src/utils/meetingIdentity');
 
@@ -184,6 +184,68 @@ console.log('\n=== Signature ignores Date-vs-string for the same instant ===');
 const asString = { ...live[0], date: live[0].date.toISOString() };
 ok('a Date and its ISO string sign identically',
   scheduleSignature(asString) === scheduleSignature(live[0]));
+
+// ---------------------------------------------------------------------------
+// Outlook invitation tracking. The point of recording what was invited is that
+// moving the meeting afterwards leaves a WRONG invitation in people's calendars
+// — that must surface, not sit behind a green tick.
+console.log('\n=== Invitation status ===');
+
+const notSent = { date: new Date(2026, 8, 15), time: '14:00' };
+ok('an unmarked meeting is not sent', invitationStatus(notSent).sent === false);
+ok('...and not stale', invitationStatus(notSent).stale === false);
+ok('a missing meeting is handled', invitationStatus(null).sent === false);
+
+const sent = {
+  date: new Date(2026, 8, 15), time: '14:00',
+  invitationSentAt: '2026-08-14T10:00:00.000Z', invitationSentBy: 'adm_christian',
+  invitationSentForDate: new Date(2026, 8, 15).toISOString(), invitationSentForTime: '14:00',
+};
+ok('a marked meeting is sent', invitationStatus(sent).sent === true);
+ok('...and not stale while nothing moved', invitationStatus(sent).stale === false);
+eq('...and keeps who sent it', invitationStatus(sent).sentBy, 'adm_christian');
+
+const movedAfterSending = Object.assign({}, sent, { date: new Date(2026, 8, 22) });
+ok('moving the date makes it stale', invitationStatus(movedAfterSending).stale === true);
+eq('...and it still reports the invited date', invitationStatus(movedAfterSending).sentFor.date, '2026-09-15');
+
+const retimedAfterSending = Object.assign({}, sent, { time: '15:30' });
+ok('changing only the time makes it stale', invitationStatus(retimedAfterSending).stale === true);
+
+// Rows marked before sent_for tracking existed simply count as sent — never
+// flag a change we have no evidence for.
+const legacy = { date: new Date(2026, 8, 22), time: '14:00', invitationSentAt: '2026-08-14T10:00:00.000Z' };
+ok('a legacy row without sent_for is sent', invitationStatus(legacy).sent === true);
+ok('...and is never reported stale', invitationStatus(legacy).stale === false);
+
+// In the director review the meeting row is a per-review COPY that can lag
+// behind program_meetings. Comparing against that copy would report "not
+// changed" for a meeting that has in fact moved — hiding exactly what this is
+// meant to surface — so the server supplies the schedule's current values.
+console.log('\n=== A lagging review copy must not hide a moved meeting ===');
+const reviewCopy = Object.assign({}, sent, {
+  date: new Date(2026, 8, 15), time: '14:00',      // the review row, still on the old date
+  invitationCurrentDate: new Date(2026, 9, 2).toISOString(), // what the schedule says now
+  invitationCurrentTime: '14:00',
+});
+ok('stale is judged against the schedule, not the review copy',
+  invitationStatus(reviewCopy).stale === true);
+const reviewCopyInSync = Object.assign({}, sent, {
+  invitationCurrentDate: new Date(2026, 8, 15).toISOString(), invitationCurrentTime: '14:00',
+});
+ok('...and stays clean when they agree', invitationStatus(reviewCopyInSync).stale === false);
+
+// The invitation is written through its own endpoint. If it were part of the
+// schedule signature, a stale tab's auto-save could clobber a shared fact.
+console.log('\n=== Invitation is not part of the auto-save signature ===');
+const base = { id: 1, programName: 'P', type: 'Onboarding meeting', date: new Date(2026, 8, 15),
+  time: '14:00', duration: 30, participants: [], description: 'd', status: 'pending' };
+const snap = snapshotSchedule([base]);
+const marked = Object.assign({}, base, {
+  invitationSentAt: '2026-08-14T10:00:00.000Z', invitationSentBy: 'adm_christian',
+  invitationSentForDate: new Date(2026, 8, 15).toISOString(), invitationSentForTime: '14:00',
+});
+eq('marking an invitation does not dirty the row', changedMeetings([marked], snap).length, 0);
 
 // ---------------------------------------------------------------------------
 console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);

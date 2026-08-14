@@ -89,6 +89,24 @@ router.post('/move-meeting', async (req, res) => {
   }
 });
 
+// Mark / unmark that the official Outlook invitation has been sent.
+// Its own endpoint, never the meetings auto-save: this is a shared fact and a
+// stale tab must not be able to overwrite it.
+router.post('/invitation', async (req, res) => {
+  try {
+    const { programName, type, date, sent, byId, forTime } = req.body;
+    if (!programName || !type || !date || typeof sent !== 'boolean') {
+      return res.status(400).json({ error: 'programName, type, date and sent (boolean) are required' });
+    }
+    const result = await dbHelpers.setInvitationSent({ programName, type, date, sent, byId, forTime });
+    console.log(`[INVITATION] ${type} / ${programName} @ ${date}: sent=${sent} (${result.updated} row(s))`);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error updating invitation status:', error);
+    res.status(500).json({ error: 'Failed to update invitation status', details: error.message });
+  }
+});
+
 // Get all programs and meetings
 router.get('/', async (req, res) => {
   try {

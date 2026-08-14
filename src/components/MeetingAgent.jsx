@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings, Send, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
@@ -8,7 +8,7 @@ import { createIsClosed } from '../utils/swedishHolidays';
 import {
   localDateKey, dateFromKey, meetingKey,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
-  scheduleSignature, snapshotSchedule, changedMeetings,
+  scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus,
 } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
@@ -1101,6 +1101,15 @@ const MeetingAgent = () => {
     }
   };
 
+  // Resolve a stored attendee id to a display name. Ids are stored rather than
+  // names so a rename in Settings never orphans the record.
+  const personName = (id) => {
+    if (!id) return null;
+    const roster = [].concat(appConfig?.admins || [], appConfig?.directors || []);
+    const person = roster.find(p => p.id === id);
+    return person ? person.name : null;
+  };
+
   // Format date for display
   const formatDate = (date) => {
     if (!date) return 'N/A';
@@ -1109,6 +1118,14 @@ const MeetingAgent = () => {
       month: 'long',
       day: 'numeric',
       weekday: 'long'
+    });
+  };
+
+  // Short Stockholm-local stamp for "sent at" ("14 aug 16:37").
+  const formatDateTimeShort = (iso) => {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString('sv-SE', {
+      timeZone: 'Europe/Stockholm', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
     });
   };
 
@@ -1150,14 +1167,61 @@ const MeetingAgent = () => {
     })));
   };
 
-  // Mark as scheduled
-  const markScheduled = (meeting) => {
+  // Mark / unmark that the official Outlook invitation has gone out.
+  //
+  // Written through its own endpoint, never the meetings auto-save: this is a
+  // shared fact that every admin and director reads, and the auto-save is driven
+  // by one tab's copy of the schedule. It also records WHICH date/time was
+  // invited, so moving the meeting afterwards surfaces as "changed after the
+  // invitation was sent" instead of leaving a wrong invitation unflagged.
+  const toggleInvitationSent = async (meeting) => {
+    const current = invitationStatus(meeting);
+    const sent = !current.sent;
+    const date = (meeting.date instanceof Date ? meeting.date : new Date(meeting.date)).toISOString();
     const key = meetingKey(meeting);
-    setMeetings(meetings.map(m =>
-      meetingKey(m) === key
-        ? { ...m, status: 'scheduled' }
-        : m
-    ));
+
+    // Optimistic — the endpoint is the authority, but the button must feel instant.
+    setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
+      invitationSentAt: sent ? new Date().toISOString() : null,
+      invitationSentBy: sent ? (adminIdentity?.id || null) : null,
+      invitationSentForDate: sent ? date : null,
+      invitationSentForTime: sent ? meeting.time : null,
+    }) : m));
+
+    try {
+      const res = await fetch(`${API_URL}/api/programs/invitation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          programName: meeting.programName,
+          type: meeting.type,
+          date,
+          sent,
+          byId: adminIdentity?.id || null,
+          forTime: meeting.time
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.updated === 0) {
+        throw new Error('mötet hittades inte i databasen — ladda om sidan');
+      }
+      // Use the server's timestamp so every tab shows the same value.
+      setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
+        invitationSentAt: data.invitationSentAt,
+        invitationSentBy: data.invitationSentBy,
+      }) : m));
+    } catch (err) {
+      console.error('Failed to update invitation status:', err);
+      alert('⚠️ Kunde inte spara utskicksstatusen (' + err.message + ').\n\nLadda om sidan och försök igen.');
+      // Roll back so the badge never claims something the database doesn't hold.
+      setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
+        invitationSentAt: meeting.invitationSentAt || null,
+        invitationSentBy: meeting.invitationSentBy || null,
+        invitationSentForDate: meeting.invitationSentForDate || null,
+        invitationSentForTime: meeting.invitationSentForTime || null,
+      }) : m));
+    }
   };
 
   // Toggle already scheduled status
@@ -1255,7 +1319,7 @@ const MeetingAgent = () => {
 
   // Export to Excel for Outlook import
   const exportToExcel = () => {
-    const approvedMeetings = meetings.filter(m => m.approved || m.status === 'scheduled');
+    const approvedMeetings = meetings.filter(isApproved);
 
     if (approvedMeetings.length === 0) {
       alert('No approved meetings to export');
@@ -1958,7 +2022,7 @@ const MeetingAgent = () => {
   // ---- Shared ICS (iCalendar) helpers ----
 
   // A meeting counts as "confirmed" for Outlook when its own flag/status says so.
-  const isApproved = m => m.approved || m.status === 'scheduled';
+  const isApproved = m => m.approved;
 
   // Escape a TEXT value per RFC 5545 (backslash, semicolon, comma, newline).
   const escapeICSText = (s) => String(s == null ? '' : s)
@@ -2212,7 +2276,8 @@ const MeetingAgent = () => {
   const stats = {
     total: filteredMeetings.length,
     approved: filteredMeetings.filter(m => m.approved).length,
-    scheduled: filteredMeetings.filter(m => m.status === 'scheduled').length,
+    invitationSent: filteredMeetings.filter(m => invitationStatus(m).sent).length,
+    invitationStale: filteredMeetings.filter(m => invitationStatus(m).stale).length,
     pending: filteredMeetings.filter(m => m.status === 'pending' && !m.approved).length,
     alreadyScheduled: filteredMeetings.filter(m => m.status === 'already-scheduled').length
   };
@@ -2613,17 +2678,22 @@ const MeetingAgent = () => {
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-gray-500 text-sm">Scheduled</p>
-                    <p className="text-3xl font-bold text-indigo-600">{stats.scheduled}</p>
+                    <p className="text-gray-500 text-sm">Inbjudan skickad</p>
+                    <p className="text-3xl font-bold text-indigo-600">{stats.invitationSent}</p>
+                    {stats.invitationStale > 0 && (
+                      <p className="text-xs font-semibold text-amber-700 mt-1">
+                        {stats.invitationStale} behöver uppdateras
+                      </p>
+                    )}
                   </div>
-                  <Clock className="w-12 h-12 text-indigo-500" />
+                  <Send className="w-12 h-12 text-indigo-500" />
                 </div>
               </div>
 
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-gray-500 text-sm">Already Scheduled</p>
+                    <p className="text-gray-500 text-sm">Bokad utanför verktyget</p>
                     <p className="text-3xl font-bold text-gray-600">{stats.alreadyScheduled}</p>
                   </div>
                   <CheckCircle className="w-12 h-12 text-gray-500" />
@@ -3051,15 +3121,18 @@ const MeetingAgent = () => {
                   // reconciler reuse the wrong card — including the open editor.
                   const key = meetingKey(meeting);
                   const isEditing = editingScheduleKey === key;
+                  const invitation = invitationStatus(meeting);
                   return (
                   <div
                     key={key}
                     className={`border-l-4 p-4 rounded-r-lg transition ${
                       isConflict
                         ? 'border-red-600 bg-red-100 shadow-lg'
+                        : invitation.stale
+                        ? 'border-amber-500 bg-amber-50'
                         : meeting.status === 'already-scheduled'
                         ? 'border-gray-400 bg-gray-100 opacity-75'
-                        : meeting.status === 'scheduled'
+                        : invitation.sent
                         ? 'border-indigo-600 bg-indigo-50'
                         : meeting.approved
                         ? 'border-green-500 bg-green-50'
@@ -3083,6 +3156,18 @@ const MeetingAgent = () => {
                               ⚠️ TIME CONFLICT
                             </span>
                           )}
+                          {invitation.sent && (
+                            <span
+                              className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                                invitation.stale ? 'bg-amber-200 text-amber-900' : 'bg-indigo-100 text-indigo-800'
+                              }`}
+                              title={invitation.sentFor
+                                ? `Inbjudan skickad för ${invitation.sentFor.date}${invitation.sentFor.time ? ' kl ' + invitation.sentFor.time : ''}`
+                                : 'Inbjudan skickad'}
+                            >
+                              {invitation.stale ? '⚠️ Inbjudan behöver uppdateras' : '📨 Inbjudan skickad'}
+                            </span>
+                          )}
                           {meeting.approvals && meeting.approvals.length > 0 && (
                             <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                               meeting.approvedCount === 2 ? 'bg-green-100 text-green-800' :
@@ -3097,6 +3182,30 @@ const MeetingAgent = () => {
                             </span>
                           )}
                         </div>
+
+                        {invitation.sent && (
+                          <div className={`mb-3 text-sm rounded-lg px-3 py-2 ${
+                            invitation.stale ? 'bg-amber-100 text-amber-900' : 'bg-indigo-50 text-indigo-900'
+                          }`}>
+                            {invitation.stale ? (
+                              <div className="flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                <span>
+                                  <strong>Mötet har flyttats sedan inbjudan skickades.</strong>{' '}
+                                  Inbjudan gäller {invitation.sentFor.date}
+                                  {invitation.sentFor.time ? ` kl ${invitation.sentFor.time}` : ''} —
+                                  mötet ligger nu {localDateKey(meeting.date)} kl {meeting.time}.
+                                  Uppdatera inbjudan i Outlook och markera om.
+                                </span>
+                              </div>
+                            ) : (
+                              <span>
+                                📨 Inbjudan skickad {formatDateTimeShort(invitation.sentAt)}
+                                {personName(invitation.sentBy) ? ` av ${personName(invitation.sentBy)}` : ''}
+                              </span>
+                            )}
+                          </div>
+                        )}
 
                         {isEditing ? (
                           <MeetingScheduleEditor
@@ -3284,7 +3393,7 @@ const MeetingAgent = () => {
                         {meeting.status === 'already-scheduled' ? (
                           <>
                             <div className="px-4 py-2 rounded-lg font-medium bg-gray-400 text-white text-center">
-                              Already Scheduled
+                              Bokad utanför verktyget
                             </div>
                             <button
                               onClick={() => toggleAlreadyScheduled(meeting)}
@@ -3306,20 +3415,29 @@ const MeetingAgent = () => {
                               {meeting.approved ? 'Approved' : 'Approve'}
                             </button>
 
-                            {meeting.approved && meeting.status !== 'scheduled' && (
-                              <button
-                                onClick={() => markScheduled(meeting)}
-                                className="px-4 py-2 rounded-lg font-medium bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition"
-                              >
-                                Mark Scheduled
-                              </button>
-                            )}
+                            <button
+                              onClick={() => toggleInvitationSent(meeting)}
+                              className={`px-4 py-2 rounded-lg font-medium transition flex items-center justify-center gap-2 ${
+                                invitation.stale
+                                  ? 'bg-amber-200 text-amber-900 hover:bg-amber-300'
+                                  : invitation.sent
+                                  ? 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              }`}
+                              title={invitation.sent
+                                ? 'Klicka för att ångra — mötet räknas då som ej utskickat'
+                                : 'Markera att den officiella inbjudan har skickats i Outlook'}
+                            >
+                              <Send className="w-4 h-4" />
+                              {invitation.stale ? 'Markera om' : invitation.sent ? 'Skickad' : 'Inbjudan skickad?'}
+                            </button>
 
                             <button
                               onClick={() => toggleAlreadyScheduled(meeting)}
                               className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 transition text-sm"
+                              title="Mötet bokades utanför det här verktyget och ska inte tas upp med directors"
                             >
-                              Already Scheduled
+                              Bokad utanför verktyget
                             </button>
 
                             {meeting.approvals && meeting.approvals.length > 0 && currentReviewId && (

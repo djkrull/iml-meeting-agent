@@ -144,8 +144,54 @@ function changedMeetings(meetings, snapshot) {
   return (meetings || []).filter(m => snapshot.get(meetingKey(m)) !== scheduleSignature(m));
 }
 
+// ---------------------------------------------------------------------------
+// Official Outlook invitation status.
+//
+// Tracked separately from `status`/`approved` on purpose: whether the invitation
+// went out is a fact about the outside world, not about the internal planning
+// consensus, and the two are independent — a meeting can be agreed but not yet
+// invited, or invited and then questioned. Folding it into `status` would make
+// the states mutually exclusive again.
+//
+// `sentForDate`/`sentForTime` record WHAT was invited. If the meeting is moved
+// afterwards, the invitation sitting in people's calendars is now wrong, and
+// that is the failure this is really guarding against — so it is reported as
+// `stale` rather than quietly showing a green tick.
+//
+// Deliberately NOT part of scheduleSignature: like Settings, this is written by
+// its own endpoint. Including it would let a stale tab's auto-save clobber a
+// shared fact (see the auto-save note above).
+function invitationStatus(m) {
+  if (!m || !m.invitationSentAt) {
+    return { sent: false, stale: false, sentAt: null, sentBy: null, sentFor: null };
+  }
+  const sentForDate = m.invitationSentForDate ? localDateKey(m.invitationSentForDate) : null;
+  const sentForTime = m.invitationSentForTime || null;
+  // Compare against the SCHEDULE's current date/time. In the director review the
+  // row is a per-review copy that can lag behind program_meetings, so the server
+  // supplies the authoritative values as invitationCurrentDate/Time; without
+  // them a meeting moved after sharing would wrongly report "not changed" —
+  // hiding the very problem this exists to surface.
+  const basisDate = m.invitationCurrentDate || m.date;
+  const basisTime = m.invitationCurrentTime || m.time;
+  const currentDate = basisDate ? localDateKey(basisDate) : null;
+  const currentTime = basisTime || null;
+  // Only claim "changed" when we actually recorded what was sent; rows marked
+  // before this was tracked simply count as sent.
+  const stale = sentForDate !== null &&
+    (sentForDate !== currentDate || (sentForTime !== null && sentForTime !== currentTime));
+  return {
+    sent: true,
+    stale,
+    sentAt: m.invitationSentAt,
+    sentBy: m.invitationSentBy || null,
+    sentFor: sentForDate ? { date: sentForDate, time: sentForTime } : null,
+  };
+}
+
 module.exports = {
   localDateKey, dateFromKey, meetingKey, isSameMeeting,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings,
+  invitationStatus,
 };
