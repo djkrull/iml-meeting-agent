@@ -37,12 +37,26 @@ function oldCalc(startDate, endDate, leadTime, weekday, programType) {
   return t;
 }
 
+// Reference for rules whose POLICY has moved them off the day-offset form.
+// Kept separate from oldCalc so the historical replica above stays verbatim.
+function policyCalc(startDate, { leadMonths, wd, snap }) {
+  const t = new Date(startDate.getTime());
+  t.setMonth(t.getMonth() + leadMonths);
+  const step = snap === 'onOrBefore' ? -1 : 1;
+  let guard = 0;
+  while (t.getDay() !== wd && guard++ < 14) t.setDate(t.getDate() + step);
+  return t;
+}
+
 // Expected leadTime/weekday by rule name. Unless flagged `policy`, these are the
 // historical hardcoded values and must never drift.
 const OLD = {
   'Introduction Meeting': { lead: -540, wd: 5, introGate: true },
-  'Check-in meeting with organizers': { lead: -180, wd: 5 },
-  'Check-in meeting junior fellows': { lead: -180, wd: 5 },
+  // POLICY 2026-09: moved from 180 days before start to 3 months before,
+  // snapped on or before Friday. The 180-day form matched neither the working-
+  // process document nor the dates communicated to organizers.
+  'Check-in meeting with organizers': { leadMonths: -3, wd: 5, snap: 'onOrBefore', policy: '2026-09 three months before start' },
+  'Check-in meeting junior fellows': { leadMonths: -3, wd: 5, snap: 'onOrBefore', policy: '2026-09 three months before start' },
   // POLICY 2026-08: moved from "Friday BEFORE start" (lead -5) to the first
   // Friday AFTER start. Verified against Fall 2026 (start Wed 2 Sep → Fri 4 Sep).
   'Onboarding meeting': { lead: 1, wd: 5, policy: '2026-08 first Friday after start' },
@@ -88,7 +102,9 @@ function checkProgram(p) {
       return;
     }
     const lead = old.introGate ? oldIntroLead(p.type, p.year) : old.lead;
-    const oldDate = oldCalc(p.start, p.end, lead, old.wd, p.type);
+    const oldDate = old.leadMonths !== undefined
+      ? policyCalc(p.start, old)
+      : oldCalc(p.start, p.end, lead, old.wd, p.type);
     const newDate = resolveMeetingDate(rule, p.start, p.end, p.year);
     checks++;
     if (fmt(oldDate) !== fmt(newDate)) {

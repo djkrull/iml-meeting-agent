@@ -39,16 +39,24 @@ const admins = [
 // Seeded identically for Spring and Fall; they can diverge once edited.
 const commonSpringFall = () => ([
   {
+    // POLICY 2026-09 (Sofie Upmark): 3 months before start, on or before Friday.
+    // Was 180 days, which put the meeting 45-88 days earlier than the working-process
+    // document's "1 November" (spring) / "1 June" (autumn). The 3-month form
+    // reproduces the dates actually communicated to the organizers of Triangulated
+    // Categories (2027-05) and Subelliptic (2027-11); the 180-day form matched
+    // neither. See the tidsplan reconciliation, Aug-Sep 2026.
     id: 'checkin_organizers', name: 'Check-in meeting with organizers',
-    anchor: 'start', offset: before(180), placement: weekdayPlacement(5),
+    anchor: 'start', offset: before(3, 'months'), placement: weekdayPlacement(5, 'onOrBefore'),
     time: '10:00', duration: 30,
     participants: ['Program Organizers', 'Admin Team', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
     description: 'Review preparations and logistics',
   },
   {
+    // Same policy change as the organizers' check-in above; the two are always
+    // held on the same day.
     id: 'checkin_junior', name: 'Check-in meeting junior fellows',
-    anchor: 'start', offset: before(180), placement: weekdayPlacement(5),
+    anchor: 'start', offset: before(3, 'months'), placement: weekdayPlacement(5, 'onOrBefore'),
     time: '10:30', duration: 30,
     participants: ['Junior Fellows', 'Admin Team', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
@@ -76,7 +84,7 @@ const commonSpringFall = () => ([
     time: DEFAULT_TIME, duration: 30,
     participants: ['Program Organizers', 'All Participants', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
-    description: 'Official program kickoff',
+    description: 'Official program kickoff (Welcome to IML). Date may change to fit the first seminar/schedule.',
   },
   {
     id: 'mid_term', name: 'Mid-term meeting',
