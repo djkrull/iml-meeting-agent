@@ -89,6 +89,23 @@ router.post('/move-meeting', async (req, res) => {
   }
 });
 
+// Lock / unlock a meeting against automatic date changes. A locked meeting keeps
+// its date through "Regenerera" and is refused by move-meeting.
+router.post('/lock', async (req, res) => {
+  try {
+    const { programName, type, date, locked, byId } = req.body;
+    if (!programName || !type || !date || typeof locked !== 'boolean') {
+      return res.status(400).json({ error: 'programName, type, date and locked (boolean) are required' });
+    }
+    const result = await dbHelpers.setMeetingLocked({ programName, type, date, locked, byId });
+    console.log(`[LOCK] ${type} / ${programName} @ ${date}: locked=${locked} (${result.updated} row(s))`);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error updating meeting lock:', error);
+    res.status(500).json({ error: 'Failed to update meeting lock', details: error.message });
+  }
+});
+
 // Mark / unmark that the official Outlook invitation has been sent.
 // Its own endpoint, never the meetings auto-save: this is a shared fact and a
 // stale tab must not be able to overwrite it.

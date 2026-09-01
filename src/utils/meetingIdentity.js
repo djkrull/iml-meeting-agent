@@ -189,9 +189,17 @@ function invitationStatus(m) {
   };
 }
 
+// A locked meeting keeps its date through "Regenerera" and is refused by the
+// move endpoint. Like the invitation fields, `lockedAt`/`lockedBy` are written
+// through their own endpoint and are deliberately absent from
+// scheduleSignature — a stale tab must not be able to clobber a shared fact.
+function isLocked(m) {
+  return !!(m && m.lockedAt);
+}
+
 module.exports = {
   localDateKey, dateFromKey, meetingKey, isSameMeeting,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings,
-  invitationStatus,
+  invitationStatus, isLocked,
 };

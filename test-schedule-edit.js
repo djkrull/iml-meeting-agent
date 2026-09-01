@@ -20,7 +20,7 @@
 
 const {
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
-  scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus,
+  scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus, isLocked,
   meetingKey, localDateKey,
 } = require('./src/utils/meetingIdentity');
 
@@ -246,6 +246,37 @@ const marked = Object.assign({}, base, {
   invitationSentForDate: new Date(2026, 8, 15).toISOString(), invitationSentForTime: '14:00',
 });
 eq('marking an invitation does not dirty the row', changedMeetings([marked], snap).length, 0);
+
+// ---------------------------------------------------------------------------
+// A locked meeting keeps its date. Excluding it from one bulk move is not enough:
+// "Regenerera" recomputes every future date from the rules, so without a state in
+// the database the next press would move a meeting whose invitation is already in
+// people's calendars.
+console.log('\n=== Locked meetings ===');
+
+const unlockedRow = { date: new Date(2026, 8, 15), time: '14:00' };
+ok('an unmarked meeting is not locked', isLocked(unlockedRow) === false);
+ok('a missing meeting is handled', isLocked(null) === false);
+ok('a marked meeting is locked', isLocked({ lockedAt: '2026-09-01T10:00:00.000Z' }) === true);
+ok('an explicitly cleared lock is not locked', isLocked({ lockedAt: null }) === false);
+
+// Like the invitation fields, the lock is written through its own endpoint. If it
+// were part of the signature, a stale tab's auto-save could clobber a shared fact.
+console.log('\n=== Locking is not part of the auto-save signature ===');
+const plain = { id: 1, programName: 'P', type: 'Onboarding meeting', date: new Date(2026, 8, 15),
+  time: '14:00', duration: 30, participants: [], description: 'd', status: 'pending' };
+const lockSnap = snapshotSchedule([plain]);
+const lockedCopy = Object.assign({}, plain, {
+  lockedAt: '2026-09-01T10:00:00.000Z', lockedBy: 'adm_christian',
+});
+eq('locking a meeting does not dirty the row', changedMeetings([lockedCopy], lockSnap).length, 0);
+eq('unlocking it does not either',
+  changedMeetings([Object.assign({}, plain, { lockedAt: null })], lockSnap).length, 0);
+
+// A locked row must still be recognised as the same meeting, so approvals and the
+// invitation status keep resolving against it.
+eq('the lock does not change the meeting identity',
+  meetingKey(lockedCopy), meetingKey(plain));
 
 // ---------------------------------------------------------------------------
 console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings, Send, AlertTriangle } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings, Send, AlertTriangle, Lock, Unlock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
@@ -8,7 +8,7 @@ import { createIsClosed } from '../utils/swedishHolidays';
 import {
   localDateKey, dateFromKey, meetingKey,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
-  scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus,
+  scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus, isLocked,
 } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
@@ -1223,6 +1223,47 @@ const MeetingAgent = () => {
         invitationSentBy: meeting.invitationSentBy || null,
         invitationSentForDate: meeting.invitationSentForDate || null,
         invitationSentForTime: meeting.invitationSentForTime || null,
+      }) : m));
+    }
+  };
+
+  // Lock / unlock a meeting against automatic date changes.
+  //
+  // Excluding a meeting from one bulk move is not enough: "Regenerera" recomputes
+  // every future date from the rules, so the next press would move a meeting whose
+  // invitation is already in people's calendars. The lock is a database state, and
+  // like the invitation status it is written through its own endpoint — never the
+  // meetings auto-save, which a stale tab could replay.
+  const toggleMeetingLock = async (meeting) => {
+    const locked = !isLocked(meeting);
+    const date = (meeting.date instanceof Date ? meeting.date : new Date(meeting.date)).toISOString();
+    const key = meetingKey(meeting);
+
+    setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
+      lockedAt: locked ? new Date().toISOString() : null,
+      lockedBy: locked ? (adminIdentity?.id || null) : null,
+    }) : m));
+
+    try {
+      const res = await fetch(`${API_URL}/api/programs/lock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          programName: meeting.programName, type: meeting.type, date,
+          locked, byId: adminIdentity?.id || null
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.updated === 0) throw new Error('meeting not found in the database — reload the page');
+      setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
+        lockedAt: data.lockedAt, lockedBy: data.lockedBy,
+      }) : m));
+    } catch (err) {
+      console.error('Failed to update meeting lock:', err);
+      alert('⚠️ Could not update the lock (' + err.message + ').\n\nReload the page and try again.');
+      setMeetings(prev => prev.map(m => meetingKey(m) === key ? Object.assign({}, m, {
+        lockedAt: meeting.lockedAt || null, lockedBy: meeting.lockedBy || null,
       }) : m));
     }
   };
@@ -3129,6 +3170,7 @@ const MeetingAgent = () => {
                   const key = meetingKey(meeting);
                   const isEditing = editingScheduleKey === key;
                   const invitation = invitationStatus(meeting);
+                  const locked = isLocked(meeting);
                   return (
                   <div
                     key={key}
@@ -3161,6 +3203,14 @@ const MeetingAgent = () => {
                           {isConflict && (
                             <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-600 text-white animate-pulse">
                               ⚠️ TIME CONFLICT
+                            </span>
+                          )}
+                          {locked && (
+                            <span
+                              className="text-xs font-semibold px-2 py-1 rounded-full bg-slate-200 text-slate-800 inline-flex items-center gap-1"
+                              title="Date locked — kept through Regenerate and refused by the date editor"
+                            >
+                              <Lock className="w-3 h-3" /> Date locked
                             </span>
                           )}
                           {invitation.sent && (
@@ -3229,13 +3279,20 @@ const MeetingAgent = () => {
                               <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
                               <div className="flex items-center gap-2">
                                 <span className="text-sm">{formatDate(meeting.date)}</span>
-                                <button
-                                  onClick={() => setEditingScheduleKey(key)}
-                                  className="text-indigo-600 hover:text-indigo-800"
-                                  title="Change the date and time. Nothing is saved until you click Save or press Enter — nothing is written while you type."
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                </button>
+                                {locked ? (
+                                  <Lock
+                                    className="w-3 h-3 text-slate-500"
+                                    title="Date locked. Unlock it below before changing the date."
+                                  />
+                                ) : (
+                                  <button
+                                    onClick={() => setEditingScheduleKey(key)}
+                                    className="text-indigo-600 hover:text-indigo-800"
+                                    title="Change the date and time. Nothing is saved until you click Save or press Enter — nothing is written while you type."
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center text-gray-700">
@@ -3427,6 +3484,21 @@ const MeetingAgent = () => {
                                 : 'Administrations own sign-off on the date and time. This is NOT the directors response — they answer for themselves via the review link.'}
                             >
                               {meeting.approved ? 'Approved' : 'Approve'}
+                            </button>
+
+                            <button
+                              onClick={() => toggleMeetingLock(meeting)}
+                              className={`px-4 py-2 rounded-lg font-medium transition flex items-center justify-center gap-2 ${
+                                locked
+                                  ? 'bg-slate-700 text-white hover:bg-slate-800'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              }`}
+                              title={locked
+                                ? 'This date is locked: Regenerate keeps it and the date editor refuses to move it. Click to unlock.'
+                                : 'Lock this date so Regenerate cannot move it. Use it once the official invitation is out, or when the meeting is too close to move.'}
+                            >
+                              {locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                              {locked ? 'Locked' : 'Lock Date'}
                             </button>
 
                             <button
