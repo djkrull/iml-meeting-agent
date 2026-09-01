@@ -172,6 +172,9 @@ const MeetingAgent = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [appConfig, setAppConfig] = useState(null); // full app_settings config (meeting rules, rosters, ...)
   const [regenPreview, setRegenPreview] = useState(null); // { regenerated, changes, weeklyOld, weeklyNew, oldCount, newCount }
+  // Second gate on Regenerate: the diff alone is easy to click past, and the
+  // operation rewrites every future date. Applying stays disabled until this is ticked.
+  const [regenConfirmed, setRegenConfirmed] = useState(false);
 
   // Load the admin roster from settings, then resolve any remembered identity.
   const loadAdminRoster = React.useCallback(async () => {
@@ -1038,10 +1041,15 @@ const MeetingAgent = () => {
     const keyOf = (m) => `${m.programName}|${m.type}|${m.programYear ?? new Date(m.date).getFullYear()}`;
 
     // Only future meetings are regenerated; past meetings are preserved untouched.
+    // Locked meetings are preserved too — replaceFutureMeetings skips them — so they
+    // must be kept out of the diff, or the preview would promise a move that the
+    // backend will refuse to make.
     const pastMeetings = meetings.filter(m => !isFuture(m));
-    const curFut = meetings.filter(isFuture);
+    const lockedFuture = meetings.filter(m => isFuture(m) && isLocked(m));
+    const lockedKeys = new Set(lockedFuture.map(m => `${m.programName}|${m.type}`));
+    const curFut = meetings.filter(m => isFuture(m) && !isLocked(m));
     const curNW = curFut.filter(m => !isWeekly(m));
-    const newNW = regenerated.filter(m => !isWeekly(m));
+    const newNW = regenerated.filter(m => !isWeekly(m) && !lockedKeys.has(`${m.programName}|${m.type}`));
     const curMap = new Map(curNW.map(m => [keyOf(m), m]));
     const seen = new Set();
     const changes = [];
@@ -1071,12 +1079,16 @@ const MeetingAgent = () => {
     }
 
     setRegenPreview({
-      finalMeetings: [...pastMeetings, ...regenerated],
-      futureMeetings: regenerated,
+      finalMeetings: [...pastMeetings, ...lockedFuture,
+        ...regenerated.filter(m => !lockedKeys.has(`${m.programName}|${m.type}`))],
+      futureMeetings: regenerated.filter(m => !lockedKeys.has(`${m.programName}|${m.type}`)),
       changes, weeklyOld, weeklyNew,
-      oldCount: curFut.length, newCount: regenerated.length,
+      oldCount: curFut.length,
+      newCount: regenerated.filter(m => !lockedKeys.has(`${m.programName}|${m.type}`)).length,
       pastCount: pastMeetings.length,
+      lockedMeetings: lockedFuture,
     });
+    setRegenConfirmed(false);
   };
 
   // Persist via the dedicated replace endpoint (deletes stale future rows so
@@ -1095,6 +1107,7 @@ const MeetingAgent = () => {
       serverScheduleRef.current = snapshotSchedule(regenPreview.finalMeetings);
       setMeetings(regenPreview.finalMeetings);
       setRegenPreview(null);
+      setRegenConfirmed(false);
     } catch (e) {
       console.error('Failed to apply regeneration:', e);
       alert('Kunde inte spara regenererade möten: ' + e.message);
@@ -2580,7 +2593,7 @@ const MeetingAgent = () => {
               <IdentityChip person={adminIdentity} onSwitch={switchAdminIdentity} />
               <button
                 onClick={regenerateMeetings}
-                title="Beräkna om alla mötesdatum från aktuella regler (visar diff innan ändring)"
+                title="Recomputes every future meeting date from the current rules. Safe to click: it only shows a preview — nothing is written until you tick the confirmation and press Apply."
                 className="flex items-center gap-2 bg-amber-100 hover:bg-amber-200 text-amber-800 px-4 py-2 rounded-lg font-medium transition"
               >
                 <RefreshCw className="w-5 h-5" />
@@ -2607,11 +2620,51 @@ const MeetingAgent = () => {
               <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
                 <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-gray-800">Regenerera möten</h2>
-                  <button onClick={() => setRegenPreview(null)} className="text-gray-500 hover:text-gray-800" title="Stäng">
+                  <button onClick={() => { setRegenPreview(null); setRegenConfirmed(false); }} className="text-gray-500 hover:text-gray-800" title="Stäng">
                     <X className="w-6 h-6" />
                   </button>
                 </div>
                 <div className="p-6 overflow-y-auto">
+                  <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold mb-2">Vad som händer om du klickar Applicera</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                      <li>
+                        Alla <strong>framtida</strong> möten räknas om från mötesreglerna. Passerade
+                        möten rörs inte.
+                      </li>
+                      <li>
+                        {regenPreview.changes.length === 0
+                          ? 'Inga möten byter datum eller tid.'
+                          : <>‌<strong>{regenPreview.changes.length}</strong> möten byter datum eller tid — se listan nedan.</>}
+                      </li>
+                      <li>
+                        Directors svar följer med till det nya datumet. Kontrollera efteråt att de
+                        fortfarande gäller.
+                      </li>
+                      <li>
+                        Möten med utskickad inbjudan markeras <em>Invitation needs updating</em> —
+                        inbjudan i Outlook måste då skickas om.
+                      </li>
+                      <li><strong>Går inte att ångra.</strong> Datumen skrivs direkt till databasen.</li>
+                    </ul>
+                  </div>
+
+                  {regenPreview.lockedMeetings && regenPreview.lockedMeetings.length > 0 && (
+                    <div className="mb-4 rounded-lg border border-slate-300 bg-slate-50 p-4 text-sm text-slate-800">
+                      <p className="font-semibold mb-2 flex items-center gap-2">
+                        <Lock className="w-4 h-4" />
+                        {regenPreview.lockedMeetings.length} låsta möten skyddas och rörs inte
+                      </p>
+                      <ul className="space-y-1">
+                        {regenPreview.lockedMeetings.map((m, i) => (
+                          <li key={i} className="font-mono text-xs">
+                            {localDateKey(m.date)} {m.time} — {m.type} · {m.programName}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   <p className="text-sm text-gray-600 mb-3">
                     Från {programs.length} program: {regenPreview.oldCount} → <strong>{regenPreview.newCount}</strong> möten.
                     {regenPreview.weeklyOld !== regenPreview.weeklyNew && (
@@ -2634,13 +2687,34 @@ const MeetingAgent = () => {
                     </div>
                   )}
                 </div>
-                <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-                  <button onClick={() => setRegenPreview(null)} className="px-4 py-2 rounded-lg font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">
-                    Avbryt
-                  </button>
-                  <button onClick={applyRegen} className="px-4 py-2 rounded-lg font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition">
-                    Applicera ({regenPreview.newCount} möten)
-                  </button>
+                <div className="p-6 border-t border-gray-200 flex flex-col gap-4">
+                  <label className="flex items-start gap-3 text-sm text-gray-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={regenConfirmed}
+                      onChange={(e) => setRegenConfirmed(e.target.checked)}
+                      className="mt-0.5 w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer flex-shrink-0"
+                    />
+                    <span>
+                      Jag har läst listan ovan och vill skriva om {regenPreview.changes.length} mötesdatum.
+                      {regenPreview.changes.length === 0 && ' (Inget ändras — du kan lika gärna avbryta.)'}
+                    </span>
+                  </label>
+                  <div className="flex justify-end gap-3">
+                    <button onClick={() => { setRegenPreview(null); setRegenConfirmed(false); }} className="px-4 py-2 rounded-lg font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">
+                      Avbryt
+                    </button>
+                    <button
+                      onClick={applyRegen}
+                      disabled={!regenConfirmed}
+                      title={regenConfirmed
+                        ? 'Skriver om alla framtida mötesdatum. Går inte att ångra.'
+                        : 'Bocka i rutan till vänster först — detta går inte att ångra.'}
+                      className="px-4 py-2 rounded-lg font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
+                    >
+                      Applicera ({regenPreview.newCount} möten)
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
