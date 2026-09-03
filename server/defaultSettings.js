@@ -87,8 +87,15 @@ const commonSpringFall = () => ([
     description: 'Official program kickoff (Welcome to IML). Date may change to fit the first seminar/schedule.',
   },
   {
+    // POLICY 2026-09: seven weeks after start, not six. The 42-day form was
+    // simply wrong about practice — five of the six existing programs already sat
+    // at 49 days, and so did the date communicated to Subelliptic's organizers
+    // (2028-03-31). Only one row followed 42, and it was the outlier rather than
+    // the reference. Quantum Fields appeared to match 42 by coincidence: its
+    // 42-day date fell on Good Friday 2027 and the closed-day jump pushed it onto
+    // the same Friday 49 days would have given.
     id: 'mid_term', name: 'Mid-term meeting',
-    anchor: 'start', offset: after(42), placement: weekdayPlacement(5),
+    anchor: 'start', offset: after(49), placement: weekdayPlacement(5),
     time: DEFAULT_TIME, duration: 30,
     participants: ['Program Organizers', 'Admin Team', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,

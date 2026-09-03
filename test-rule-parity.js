@@ -64,7 +64,8 @@ const OLD = {
   // first Tuesday AFTER start, tied to the first seminar.
   // Verified against Fall 2026 (start Wed 2 Sep → Tue 8 Sep).
   'Program Start Meeting': { lead: 1, wd: 2, policy: '2026-08 first Tuesday after start' },
-  'Mid-term meeting': { lead: 42, wd: 5 },
+  // POLICY 2026-09: 42 -> 49 days. See the note in defaultSettings.js.
+  'Mid-term meeting': { lead: 49, wd: 5, policy: '2026-09 seven weeks after start' },
   'Evaluation meeting/lunch': { lead: 'end', wd: 5 },
   'Meeting with organizer and B&P': { lead: -120, wd: 5 },
   'Check-in meeting with Organizer': { lead: -45, wd: 5 },
