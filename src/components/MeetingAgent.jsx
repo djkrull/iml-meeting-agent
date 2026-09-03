@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
 import { resolveMeetingDate } from '../utils/meetingRuleEngine';
-import { createIsClosed } from '../utils/swedishHolidays';
+import { createIsBlocked } from '../utils/swedishHolidays';
 import {
   localDateKey, dateFromKey, meetingKey,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
@@ -831,8 +831,10 @@ const MeetingAgent = () => {
     const generatedMeetings = [];
     let meetingId = 1;
     const summerConferenceMeetings = new Map(); // Track shared summer conference meetings
-    // Skip Swedish red days + admin-maintained IML-closed days when placing meetings.
-    const isClosed = createIsClosed(appConfig.imlClosedDays || []);
+    // Skip Swedish red days and the periods when IML cannot staff meetings.
+    // `imlClosedDays` is the old name for the same list, kept so a config that
+    // has not been migrated yet still works.
+    const isBlocked = createIsBlocked(appConfig.noMeetingPeriods || appConfig.imlClosedDays || []);
 
     // Build lookup of previous year's times (cyclical by program TYPE + meeting TYPE)
     // Key: "{programType}|{meetingTypeName}|{year}" -> time
@@ -879,13 +881,13 @@ const MeetingAgent = () => {
 
           if (!summerConferenceMeetings.has(meetingKey)) {
             // Resolve date from the configured rule (anchor + offset + placement),
-            // skipping Swedish red days / IML-closed days.
+            // skipping red days and periods IML cannot staff.
             let meetingDate = resolveMeetingDate(
               meetingType,
               program.startDate,
               program.endDate,
               program.startDate.getFullYear(),
-              { isClosed }
+              { isBlocked }
             );
 
             if (meetingDate) {
@@ -937,7 +939,7 @@ const MeetingAgent = () => {
 
           let weekCount = 0;
           while (currentDate <= program.endDate && weekCount < maxWeeks) {
-            if (currentDate.getDay() === meetingType.placement.weekday && !isClosed(currentDate)) {
+            if (currentDate.getDay() === meetingType.placement.weekday && !isBlocked(currentDate)) {
               const inheritedTime = getInheritedTime(
                 program.type,
                 meetingType.name,
@@ -965,13 +967,13 @@ const MeetingAgent = () => {
             currentDate.setDate(currentDate.getDate() + 1);
           }
         } else if (!meetingType.recurring) {
-          // Resolve meeting date from the configured rule (skip red/closed days).
+          // Resolve meeting date from the configured rule (skip blocked days).
           let meetingDate = resolveMeetingDate(
             meetingType,
             program.startDate,
             program.endDate,
             program.startDate.getFullYear(),
-            { isClosed }
+            { isBlocked }
           );
 
           if (meetingDate) {

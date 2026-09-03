@@ -52,8 +52,13 @@ function snapToWeekday(date, weekday, snap) {
 }
 
 // Resolve a single meeting's date from its rule + a program's start/end.
-// opts.isClosed(date) -> boolean is optional (Phase 5: skip holidays / IML-closed
-// days by stepping in the snap direction to the next valid same-weekday slot).
+//
+// opts.isBlocked(date) -> boolean is optional: Swedish red days plus the periods
+// when IML has too little staffing to hold meetings. A blocked date is stepped
+// over in the direction of the rule's OWN snap, which is what makes long blocked
+// periods behave sensibly: a check-in (snap: onOrBefore) lands BEFORE the summer
+// rather than being pushed to a fortnight before the program starts, while an
+// onboarding (snap: forward) moves past it.
 function resolveMeetingDate(rule, startDate, endDate, programYear, opts = {}) {
   if (!startDate) return null;
   const base = rule.anchor === 'end' ? endDate : startDate;
@@ -65,24 +70,25 @@ function resolveMeetingDate(rule, startDate, endDate, programYear, opts = {}) {
   if (place.mode === 'weekday' && place.weekday != null) {
     date = snapToWeekday(date, place.weekday, place.snap || 'forward');
 
-    // Optional holiday / closed-day avoidance (Phase 5): keep the same weekday,
-    // jump a week in the snap direction until the day is open.
-    if (typeof opts.isClosed === 'function') {
+    // Keep the same weekday, jump a week in the snap direction until the day is
+    // available. 52 iterations covers a full year, so even a multi-week blocked
+    // period terminates.
+    if (typeof opts.isBlocked === 'function') {
       const step = (place.snap === 'backward' || place.snap === 'onOrBefore') ? -7 : 7;
       let guard = 0;
-      while (opts.isClosed(date) && guard < 52) {
+      while (opts.isBlocked(date) && guard < 52) {
         date.setDate(date.getDate() + step);
         guard++;
       }
     }
-  } else if (typeof opts.isClosed === 'function' && opts.isClosed(date)) {
-    // Exact-placement meeting (e.g. Program Start) that lands on a closed day:
-    // move forward to the next open weekday (skip red/closed days and weekends).
+  } else if (typeof opts.isBlocked === 'function' && opts.isBlocked(date)) {
+    // Exact-placement meeting (e.g. Program Start) that lands on a blocked day:
+    // move forward to the next available weekday.
     let guard = 0;
     do {
       date.setDate(date.getDate() + 1);
       guard++;
-    } while ((opts.isClosed(date) || date.getDay() === 0 || date.getDay() === 6) && guard < 31);
+    } while ((opts.isBlocked(date) || date.getDay() === 0 || date.getDay() === 6) && guard < 31);
   }
 
   return date;

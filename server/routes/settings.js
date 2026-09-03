@@ -46,7 +46,7 @@ router.get('/', async (req, res) => {
 
 // Replace the configuration. Requires the correct PIN in the body (the frontend
 // gate is not trusted on its own). Merges over the existing config so a stale or
-// partial client can never drop meetingRules / imlClosedDays / the PIN.
+// partial client can never drop meetingRules / noMeetingPeriods / the PIN.
 router.put('/', async (req, res) => {
   try {
     if (lockedUntil(req)) {
@@ -80,7 +80,14 @@ router.put('/', async (req, res) => {
         !merged.meetingRules || typeof merged.meetingRules !== 'object') {
       return res.status(400).json({ error: 'Ogiltig konfiguration (directors/admins/meetingRules saknas).' });
     }
-    if (!Array.isArray(merged.imlClosedDays)) merged.imlClosedDays = current.imlClosedDays || [];
+    // Migrate the old name once: it described the wrong thing (IML is open in
+    // summer; it just cannot staff meetings), and single dates could not express
+    // a season. Legacy entries are plain date strings and stay valid — the
+    // predicate accepts both shapes.
+    if (!Array.isArray(merged.noMeetingPeriods)) {
+      merged.noMeetingPeriods = current.noMeetingPeriods || current.imlClosedDays || [];
+    }
+    delete merged.imlClosedDays;
 
     await dbHelpers.saveSettings(merged);
     res.status(200).json({ success: true });

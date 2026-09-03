@@ -206,7 +206,12 @@ function buildDefaultConfig() {
     settingsPin: '1234',
     directors,
     admins,
-    imlClosedDays: [], // admin-maintained extra closed dates (local YYYY-MM-DD)
+    // Periods when IML cannot hold meetings — typically summer, when only one
+    // administrator is on site. NOT "closed": the institute operates throughout
+    // (the summer conferences run in July), it simply cannot staff meetings.
+    // Shape: [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', label }]. Swedish red days
+    // are handled automatically and do not belong here.
+    noMeetingPeriods: [],
     meetingRules,
   };
 }

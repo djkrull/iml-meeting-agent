@@ -24,7 +24,7 @@ The user and all IML/KVA operations are in **Sweden (CET/CEST, UTC+1/+2)**. All 
 - `reviews` — director-review sessions (one per "Share for Director Review").
 - `meetings` — per-review COPY of meetings for a specific review.
 - `approvals` — reviewer responses. **Foreign key points to `meetings`, NOT `program_meetings`.** Wiping `program_meetings` does NOT affect approvals. Has `role` (`'director'`|`'admin'`) and a stable `attendee_id` (the config id of the director/admin) — see Configuration below.
-- `app_settings` — **single-row** (`id = 1`) JSON config blob: directors, admins, meeting rules, PIN, IML-closed days, active-review pointer. See Configuration below.
+- `app_settings` — **single-row** (`id = 1`) JSON config blob: directors, admins, meeting rules, PIN, periods without meetings, active-review pointer. See Configuration below.
 
 ### PostgreSQL gotcha (root cause of a full day of silent failures)
 `CREATE UNIQUE INDEX` creates an index, NOT a constraint. `INSERT ... ON CONFLICT ON CONSTRAINT <name>` requires a real named `CONSTRAINT` (`ALTER TABLE ... ADD CONSTRAINT`). When mismatched, every INSERT throws, the backend returns 500, and the frontend swallows the error → UI shows "Total Meetings: N" but DB has far fewer rows.
@@ -41,9 +41,9 @@ The user and all IML/KVA operations are in **Sweden (CET/CEST, UTC+1/+2)**. All 
 
 ## Configuration (app_settings) & Settings UI
 
-Directors, admins, the PIN, IML-closed days, and **all meeting rules** are config, not hardcode. They live in the single-row `app_settings.config` JSON, seeded on first run from [server/defaultSettings.js](server/defaultSettings.js) (which mirrors the values that used to be hardcoded). The old `meetingTypes`/`calculateMeetingDate` constants in `MeetingAgent.jsx` are **gone** — don't reintroduce them.
+Directors, admins, the PIN, the periods without meetings, and **all meeting rules** are config, not hardcode. They live in the single-row `app_settings.config` JSON, seeded on first run from [server/defaultSettings.js](server/defaultSettings.js) (which mirrors the values that used to be hardcoded). The old `meetingTypes`/`calculateMeetingDate` constants in `MeetingAgent.jsx` are **gone** — don't reintroduce them.
 
-`config` shape: `{ version, settingsPin, directors[], admins[], imlClosedDays[], meetingRules{ <programType>: Rule[] }, activeReviewId }`.
+`config` shape: `{ version, settingsPin, directors[], admins[], noMeetingPeriods[], meetingRules{ <programType>: Rule[] }, activeReviewId }`.
 A `Rule` = `{ id, name, anchor:'start'|'end', offset:{amount,unit:'days'|'weeks'|'months',direction:'before'|'after'|'on'}, placement:{mode:'weekday'|'exact', weekday, snap:'forward'|'backward'|'onOrBefore'|'nearest'}, time, duration, participants[], requiresDirectors, recurring, sharedPerYear, group, offsetOverrideFromYear? }`.
 
 - **Seed offsets are stored in DAYS** to reproduce the historical `leadTime` day-offsets exactly (golden-test parity). The Settings UI lets admins switch a rule to months/weeks (which may shift that rule's date a few days — by design, future generation only).
@@ -51,14 +51,20 @@ A `Rule` = `{ id, name, anchor:'start'|'end', offset:{amount,unit:'days'|'weeks'
 
 ### API ([server/routes/settings.js](server/routes/settings.js)) — saved EXPLICITLY, never via the meetings auto-save
 - `GET /api/settings` → config **with the PIN stripped** (`hasPin` boolean instead). Public-safe (rosters + rules are needed on the dashboard/director link).
-- `PUT /api/settings` → requires the correct PIN in the body (the frontend gate is not trusted on its own), **merges** over the current config (never drops `meetingRules`/`imlClosedDays`/PIN/`activeReviewId`), validates shape.
+- `PUT /api/settings` → requires the correct PIN in the body (the frontend gate is not trusted on its own), **merges** over the current config (never drops `meetingRules`/`noMeetingPeriods`/PIN/`activeReviewId`), validates shape.
 - `POST /api/settings/verify-pin` — rate-limited (locks after 5 fails). PIN is low-security (internal tool) but must never be returned by GET.
 
 ### Rule engine ([src/utils/meetingRuleEngine.js](src/utils/meetingRuleEngine.js)) — CommonJS so Node tests + CRA share it
-`resolveMeetingDate(rule, start, end, programYear, { isClosed })`: anchor → offset (local-time month/week/day math) → placement (weekday+snap, or exact) → holiday/closed-day avoidance. `generateMeetings` reads rules from the loaded config and calls this. **Golden test [test-rule-parity.js](test-rule-parity.js) must stay green** (seed config reproduces historical dates exactly — run before changing the engine).
+`resolveMeetingDate(rule, start, end, programYear, { isBlocked })`: anchor → offset (local-time month/week/day math) → placement (weekday+snap, or exact) → avoidance of red days and periods without meetings. `generateMeetings` reads rules from the loaded config and calls this. **Golden test [test-rule-parity.js](test-rule-parity.js) must stay green** (seed config reproduces historical dates exactly — run before changing the engine).
 
-### Swedish holidays / IML-closed days ([src/utils/swedishHolidays.js](src/utils/swedishHolidays.js))
-`swedishHolidays(year)` (red days incl. movable Easter feasts, midsommar, alla helgons dag, + de-facto-closed eves) and `createIsClosed(imlClosedDays)`. Weekday-placed meetings jump a week (same weekday) until open; exact-placement meetings (Program Start) move to the next open weekday; weekly meetings skip closed weeks. Unit test: [test-holidays.js](test-holidays.js).
+### Swedish holidays / periods without meetings ([src/utils/swedishHolidays.js](src/utils/swedishHolidays.js))
+`swedishHolidays(year)` (red days incl. movable Easter feasts, midsommar, alla helgons dag, + de-facto-closed eves) and `createIsBlocked(noMeetingPeriods)`. Weekday-placed meetings jump a week (same weekday) until free; exact-placement meetings (Program Start) move to the next available weekday; weekly meetings skip blocked weeks. Unit test: [test-holidays.js](test-holidays.js).
+
+**The config is `noMeetingPeriods`, not "closed days".** IML is rarely closed — the summer conferences run right through July. What happens is that for stretches of the year only one administrator is on site, so meetings cannot be booked while the institute is very much operating. The old name (`imlClosedDays`) invited exactly the wrong conclusion, and the list sat empty in production because IML is, reasonably, not closed. Renamed 2026-09 while the list was still empty, so no migration was needed; `createIsBlocked` still accepts the legacy flat array of date strings, and `PUT /api/settings` migrates the old key once.
+
+Shape: `[{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', label }]`. Ranges, not single days — a summer runs to roughly forty weekdays and listing them one by one made the list unmaintainable.
+
+**Direction is not configured.** A blocked date is stepped over in the direction of the rule's own `snap`, which is what makes long periods behave: a check-in (`snap: 'onOrBefore'`) lands *before* the summer rather than being shoved to a fortnight before the program starts, while an onboarding (`snap: 'forward'`) moves past it.
 
 ### Identity ([src/components/IdentityGate.jsx](src/components/IdentityGate.jsx))
 Admin dashboard and the director link both gate behind a name picker (roster from config). localStorage stores the **stable id**, not the name (rename-safe). "Remember me" optional. Admins also appear in the director-review picker (tagged Administratör) and mark attendance — see Approvals below.

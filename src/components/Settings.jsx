@@ -173,37 +173,75 @@ const Settings = ({ onClose }) => {
 
           {config && activeTab === 'rules' && (
             <>
-              {/* IML-closed days (Swedish red days are handled automatically) */}
+              {/* Periods when IML cannot staff meetings. Swedish red days are automatic. */}
               <div className="mb-6 border border-amber-200 rounded-lg p-4 bg-amber-50">
-                <h3 className="font-bold text-gray-800 mb-1">IML-stängda dagar</h3>
+                <h3 className="font-bold text-gray-800 mb-1">Perioder utan möten</h3>
                 <p className="text-sm text-gray-500 mb-3">
-                  Extra dagar då inga möten ska läggas, utöver svenska röda dagar (som hanteras automatiskt). Schemalagda möten som hamnar på en stängd dag flyttas till närmaste öppna veckodag; veckomöten den veckan hoppas över.
+                  Perioder då möten inte kan läggas, typiskt sommaren när bara en administratör
+                  är på plats. Det handlar alltså inte om att IML är stängt — verksamheten pågår,
+                  men bemanningen räcker inte till möten. Svenska röda dagar hanteras automatiskt
+                  och ska inte listas här.
                 </p>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {(config.imlClosedDays || []).map((day, idx) => (
-                    <div key={idx} className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg px-2 py-1">
-                      <input
-                        type="date"
-                        value={day || ''}
-                        onChange={(e) => setConfig(prev => ({ ...prev, imlClosedDays: prev.imlClosedDays.map((d, i) => i === idx ? e.target.value : d) }))}
-                        className="text-sm focus:outline-none"
-                      />
-                      <button
-                        onClick={() => setConfig(prev => ({ ...prev, imlClosedDays: prev.imlClosedDays.filter((_, i) => i !== idx) }))}
-                        className="text-red-500 hover:text-red-700"
-                        title="Ta bort"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  {(config.imlClosedDays || []).length === 0 && <span className="text-sm text-gray-400">Inga extra stängda dagar.</span>}
+                <p className="text-sm text-gray-500 mb-3">
+                  Ett möte som hamnar i en period flyttas åt det håll dess egen regel snäppar:
+                  check-in läggs <strong>före</strong> perioden, onboarding <strong>efter</strong>.
+                  Veckomöten hoppas över de veckorna.
+                </p>
+                <div className="flex flex-col gap-2 mb-3">
+                  {(config.noMeetingPeriods || []).map((per, idx) => {
+                    const upd = (patch) => setConfig(prev => ({
+                      ...prev,
+                      noMeetingPeriods: (prev.noMeetingPeriods || []).map((x, i) =>
+                        i === idx ? { ...(typeof x === 'string' ? { from: x, to: x } : x), ...patch } : x)
+                    }));
+                    const cur = typeof per === 'string' ? { from: per, to: per, label: '' } : (per || {});
+                    return (
+                      <div key={idx} className="flex flex-wrap items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2">
+                        <input
+                          type="date"
+                          value={cur.from || ''}
+                          onChange={(e) => upd({ from: e.target.value })}
+                          className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          title="Första dagen i perioden"
+                        />
+                        <span className="text-gray-400">–</span>
+                        <input
+                          type="date"
+                          value={cur.to || ''}
+                          onChange={(e) => upd({ to: e.target.value })}
+                          className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          title="Sista dagen i perioden"
+                        />
+                        <input
+                          type="text"
+                          value={cur.label || ''}
+                          onChange={(e) => upd({ label: e.target.value })}
+                          placeholder="t.ex. Sommar 2027"
+                          className="flex-1 min-w-[140px] text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          title="Fritext så att det går att se varför perioden finns"
+                        />
+                        {cur.from && cur.to && cur.to < cur.from && (
+                          <span className="text-xs font-semibold text-red-700">Slutdatum före startdatum</span>
+                        )}
+                        <button
+                          onClick={() => setConfig(prev => ({ ...prev, noMeetingPeriods: (prev.noMeetingPeriods || []).filter((_, i) => i !== idx) }))}
+                          className="text-red-500 hover:text-red-700"
+                          title="Ta bort perioden"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {(config.noMeetingPeriods || []).length === 0 && (
+                    <span className="text-sm text-gray-400">Inga perioder inlagda — bara röda dagar undviks.</span>
+                  )}
                 </div>
                 <button
-                  onClick={() => setConfig(prev => ({ ...prev, imlClosedDays: [...(prev.imlClosedDays || []), ''] }))}
+                  onClick={() => setConfig(prev => ({ ...prev, noMeetingPeriods: [...(prev.noMeetingPeriods || []), { from: '', to: '', label: '' }] }))}
                   className="inline-flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-3 py-1.5 rounded-lg font-semibold transition text-sm"
                 >
-                  <Plus className="w-4 h-4" /> Lägg till dag
+                  <Plus className="w-4 h-4" /> Lägg till period
                 </button>
               </div>
 

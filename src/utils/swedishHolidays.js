@@ -72,18 +72,67 @@ function swedishHolidays(year) {
   return s;
 }
 
-// Build an isClosed(date) predicate over Swedish holidays + admin-maintained
-// IML-closed dates. Caches the holiday set per year.
-function createIsClosed(imlClosedDays) {
-  const extra = new Set((imlClosedDays || []).map(s => String(s).slice(0, 10)));
+// Build an isBlocked(date) predicate: Swedish red days plus the admin-maintained
+// periods when IML cannot hold meetings. Caches the holiday set per year.
+//
+// The config used to be called "IML-closed days", which described the wrong
+// thing. IML is rarely closed — the summer conferences run right through July.
+// What happens is that for stretches of the year only one administrator is on
+// site, so meetings cannot be booked even though the institute is operating.
+// The name matters because "closed" invites someone to leave the list empty on
+// the reasonable grounds that IML is, in fact, open.
+//
+// Accepts either form:
+//   periods: [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', label }]   preferred
+//   legacy:  ['YYYY-MM-DD', ...]                                 single days
+// A summer runs to roughly forty weekdays; listing them one by one made the
+// list unmaintainable, which is why ranges exist.
+//
+// Direction is NOT configured here. A blocked date is stepped over by the rule
+// engine in the direction of that rule's own `snap`, so a check-in
+// (snap: onOrBefore) moves BACK out of the summer while an onboarding
+// (snap: forward) moves FORWARD. That is already the behaviour you want.
+function normalisePeriods(input) {
+  const out = [];
+  (input || []).forEach((p) => {
+    if (typeof p === 'string') {
+      const d = p.slice(0, 10);
+      if (d) out.push({ from: d, to: d, label: '' });
+      return;
+    }
+    if (p && p.from) {
+      const from = String(p.from).slice(0, 10);
+      const to = String(p.to || p.from).slice(0, 10);
+      out.push({ from: from <= to ? from : to, to: from <= to ? to : from, label: p.label || '' });
+    }
+  });
+  return out;
+}
+
+function createIsBlocked(periods) {
+  const ranges = normalisePeriods(periods);
   const cache = new Map();
   return (date) => {
     const d = date instanceof Date ? date : new Date(date);
     const y = d.getFullYear();
     if (!cache.has(y)) cache.set(y, swedishHolidays(y));
     const key = ymd(d);
-    return cache.get(y).has(key) || extra.has(key);
+    if (cache.get(y).has(key)) return true;
+    for (let i = 0; i < ranges.length; i++) {
+      if (key >= ranges[i].from && key <= ranges[i].to) return true;
+    }
+    return false;
   };
 }
 
-module.exports = { swedishHolidays, createIsClosed, easterSunday, ymd };
+// Which period blocks this date, if any — for showing a reason in the UI.
+function blockingPeriod(periods, date) {
+  const ranges = normalisePeriods(periods);
+  const key = ymd(date instanceof Date ? date : new Date(date));
+  for (let i = 0; i < ranges.length; i++) {
+    if (key >= ranges[i].from && key <= ranges[i].to) return ranges[i];
+  }
+  return null;
+}
+
+module.exports = { swedishHolidays, createIsBlocked, blockingPeriod, normalisePeriods, easterSunday, ymd };

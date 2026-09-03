@@ -1,6 +1,6 @@
 // Verifies Swedish holiday computation (incl. movable Easter feasts + midsommar)
-// and the isClosed predicate. Run: node test-holidays.js
-const { swedishHolidays, createIsClosed, easterSunday, ymd } = require('./src/utils/swedishHolidays');
+// and the isBlocked predicate. Run: node test-holidays.js
+const { swedishHolidays, createIsBlocked, blockingPeriod, easterSunday, ymd } = require('./src/utils/swedishHolidays');
 
 let fails = 0;
 const check = (cond, msg) => { if (!cond) { fails++; console.log('  FAIL:', msg); } else { console.log('  ok:', msg); } };
@@ -30,11 +30,31 @@ for (const [name, date] of Object.entries(expect27)) check(h27.has(date), `${nam
 // Alla helgons dag 2027 = Saturday Oct 30 – Nov 5 → 2027-11-06? compute: Oct 31 2027 is a Sunday → first Sat in [Oct31..Nov6] is Nov 6.
 console.log('\nAlla helgons dag 2027 present (Nov 6):', h27.has('2027-11-06'));
 
-console.log('\nisClosed predicate:');
-const isClosed = createIsClosed(['2027-08-13']); // an IML-specific closed day
-check(isClosed(new Date(2027, 2, 26)), 'Långfredag 2027-03-26 is closed');     // red day
-check(isClosed(new Date(2027, 7, 13)), 'IML-closed 2027-08-13 is closed');     // custom
-check(!isClosed(new Date(2027, 7, 20)), 'normal Friday 2027-08-20 is open');   // not closed
+console.log('\nisBlocked predicate — legacy single dates:');
+// The old config was a flat list of date strings. Those must keep working: the
+// rename happened while the production list was empty, but an un-migrated config
+// elsewhere would otherwise silently stop blocking anything.
+const legacy = createIsBlocked(['2027-08-13']);
+check(legacy(new Date(2027, 2, 26)), 'Långfredag 2027-03-26 is blocked');      // red day
+check(legacy(new Date(2027, 7, 13)), 'legacy single date 2027-08-13 blocked'); // custom
+check(!legacy(new Date(2027, 7, 20)), 'normal Friday 2027-08-20 is free');
+
+console.log('\nisBlocked predicate — periods:');
+// A summer runs to ~40 weekdays; listing them individually is why ranges exist.
+const sommar = [{ from: '2027-06-25', to: '2027-08-14', label: 'Sommar 2027' }];
+const blocked = createIsBlocked(sommar);
+check(!blocked(new Date(2027, 5, 24)), 'day before the period is free');
+check(blocked(new Date(2027, 5, 25)),  'first day of the period is blocked');
+check(blocked(new Date(2027, 6, 9)),   'mid-period is blocked');
+check(blocked(new Date(2027, 7, 14)),  'last day of the period is blocked');
+check(!blocked(new Date(2027, 7, 15)), 'day after the period is free');
+check(blocked(new Date(2027, 11, 25)), 'red days still blocked alongside periods');
+check(blockingPeriod(sommar, new Date(2027, 6, 9)).label === 'Sommar 2027', 'the blocking period is named');
+check(blockingPeriod(sommar, new Date(2027, 8, 1)) === null, 'a free date has no blocking period');
+
+// Reversed input should not silently match nothing.
+const bakvant = createIsBlocked([{ from: '2027-08-14', to: '2027-06-25' }]);
+check(bakvant(new Date(2027, 6, 9)), 'a period entered backwards is still honoured');
 
 console.log(`\n=== ${fails === 0 ? 'HOLIDAYS OK' : fails + ' FAILURES'} ===`);
 process.exit(fails === 0 ? 0 : 1);
