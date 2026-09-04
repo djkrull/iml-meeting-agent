@@ -15,6 +15,46 @@ const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
+// ---------------------------------------------------------------------------
+// ONE-OFF 2027 EXCEPTION — SC27 Special Introduction/Check-in meetings.
+//
+// Three of the ten 2027 Summer Conferences run back-to-back with "Minneshögtid
+// GML 100 år" (Gösta Mittag-Leffler's 100-year jubilee). That jubilee is NOT a
+// row in this app's `programs` table — memorial events are excluded by design
+// (see CLAUDE.md "Memorial events"). Its organizers, plus the jubilee's own
+// contact, need an extra Introduction/Check-in meeting 14 days before the
+// ordinary shared Summer Conference one (before(240)/before(90) + Friday
+// snap), as ONE meeting each — no Group 1/Group 2 split.
+//
+// Deliberately NOT a meetingRules['Summer Conference'] entry: every rule there
+// applies to ALL Summer Conference programs of every year, and this is a
+// single-year, three-program exception — see CLAUDE.md's "config not
+// hardcode" rule, which this block is a narrow, deliberate exception to.
+// REMOVE after the 2027 Summer Conference season.
+const SC27_SPECIAL_DATE_RANGES_2027 = [
+  { from: '2027-05-23', to: '2027-05-27', nameHint: 'universality' },
+  { from: '2027-06-06', to: '2027-06-10', nameHint: 'geometric flows' },
+  { from: '2027-06-13', to: '2027-06-17', nameHint: 'ai for mathematics' },
+];
+const SC27_SPECIAL_RULES = [
+  {
+    name: 'SC27 Special Introduction Meeting',
+    offset: { amount: 254, unit: 'days', direction: 'before' }, // ordinary 240 + 14
+    placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
+    time: '11:00', duration: 30,
+    participants: ['SC27 Conference Organizers', 'GML100 Jubilee Contact', 'Admin Team', 'Directors'],
+    description: 'Initial planning — the three SC27 conferences held alongside the GML 100-year jubilee',
+  },
+  {
+    name: 'SC27 Special Check-in Meeting',
+    offset: { amount: 104, unit: 'days', direction: 'before' }, // ordinary 90 + 14
+    placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
+    time: '11:00', duration: 30,
+    participants: ['SC27 Conference Organizers', 'GML100 Jubilee Contact', 'Admin Team'],
+    description: 'Pre-conference preparations review — the three SC27 conferences held alongside the GML 100-year jubilee',
+  },
+];
+
 // Inline date/time editor for one meeting in the timeline.
 //
 // Everything typed lives in LOCAL draft state and is committed in a single
@@ -863,6 +903,54 @@ const MeetingAgent = () => {
       const rules = appConfig?.meetingRules?.[program.type];
       return Array.isArray(rules) ? rules : [];
     };
+
+    // One-off SC27 (2027) special meetings — see constants above generateMeetings.
+    const sc27SpecialPrograms = programList.filter(p => {
+      if (p.type !== 'Summer Conference' || !p.startDate) return false;
+      const ymd = localDateKey(p.startDate); // Stockholm-local day, not UTC
+      return SC27_SPECIAL_DATE_RANGES_2027.some(r => ymd >= r.from && ymd <= r.to);
+    });
+    if (sc27SpecialPrograms.length > 0 && sc27SpecialPrograms.length !== SC27_SPECIAL_DATE_RANGES_2027.length) {
+      console.warn(`SC27 special meetings: expected ${SC27_SPECIAL_DATE_RANGES_2027.length} matching programs, found ${sc27SpecialPrograms.length}. Check SC27_SPECIAL_DATE_RANGES_2027 against the live programs table.`);
+    }
+    sc27SpecialPrograms.forEach(p => {
+      const ymd = localDateKey(p.startDate);
+      const hint = SC27_SPECIAL_DATE_RANGES_2027.find(r => ymd >= r.from && ymd <= r.to)?.nameHint;
+      if (hint && !(p.name || '').toLowerCase().includes(hint)) {
+        console.warn(`SC27 special meetings: program "${p.name}" matched by date but not by expected name hint "${hint}" — verify this is really the right program.`);
+      }
+    });
+    if (sc27SpecialPrograms.length > 0) {
+      const earliest = sc27SpecialPrograms.reduce((a, b) => (a.startDate <= b.startDate ? a : b));
+      const organizers = sc27SpecialPrograms
+        .map(p => p.organizer)
+        .filter((org, idx, self) => self.indexOf(org) === idx)
+        .join(' / ');
+      SC27_SPECIAL_RULES.forEach(rule => {
+        const meetingDate = resolveMeetingDate(
+          { anchor: 'start', offset: rule.offset, placement: rule.placement },
+          earliest.startDate, earliest.endDate, 2027, { isBlocked }
+        );
+        if (!meetingDate) return;
+        const inheritedTime = getInheritedTime('Summer Conference', rule.name, 2027, rule.time);
+        generatedMeetings.push({
+          id: meetingId++,
+          programId: 'sc27-special-2027',
+          programName: 'SC27 Special Conferences',
+          programType: 'Summer Conference',
+          programYear: 2027,
+          programOrganizer: organizers,
+          type: rule.name,
+          date: meetingDate,
+          time: inheritedTime,
+          duration: rule.duration,
+          participants: rule.participants,
+          description: rule.description,
+          status: 'pending',
+          approved: false,
+        });
+      });
+    }
 
     programList.forEach(program => {
       const programMeetings = getMeetingTypes(program);
