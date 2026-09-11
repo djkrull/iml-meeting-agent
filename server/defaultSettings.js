@@ -102,9 +102,12 @@ const commonSpringFall = () => ([
     description: 'Progress check and adjustments',
   },
   {
+    // POLICY 2026-09 (IML working-process document "Arbetsprocesser", spring and
+    // fall): the Friday two weeks before the program ends, so the evaluation
+    // happens while everyone is still here. Was: the last Friday on/before the
+    // end (historical `leadTime: 'end'`).
     id: 'evaluation', name: 'Evaluation meeting/lunch',
-    // End-anchored: last Friday on/before program end (historical `leadTime: 'end'`).
-    anchor: 'end', offset: before(0), placement: weekdayPlacement(5, 'onOrBefore'),
+    anchor: 'end', offset: before(2, 'weeks'), placement: weekdayPlacement(5, 'onOrBefore'),
     time: '12:00', duration: 90,
     participants: ['Program Organizers', 'Directors'],
     requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
@@ -112,21 +115,24 @@ const commonSpringFall = () => ([
   },
 ]);
 
-// Introduction Meeting differs by program-year (FP28+/SP29+ uses 20 months / 600d).
-const introMeeting = (overrideFromYear) => ({
+// POLICY 2026-09 (Arbetsprocesser, "1,5 years before program"): spring ≈ Sep 15,
+// fall ≈ Mar 1. Expressed in months so the date lands where the document says:
+// 17 months before a Feb start, 18 before a Sep start. Replaces 540 days with a
+// year-gated 600-day override from FP28/SP29 — that override put FP28 in January
+// and would have moved SP29 to June, against the document. The engine still
+// supports `offsetOverrideFromYear`; no seeded rule uses it.
+const introMeeting = (months, snap) => ({
   id: 'introduction', name: 'Introduction Meeting',
-  anchor: 'start', offset: before(540), placement: weekdayPlacement(5),
+  anchor: 'start', offset: before(months, 'months'), placement: weekdayPlacement(5, snap),
   time: '10:00', duration: 30,
   participants: ['Program Organizers', 'Directors', 'Admin Coordinator'],
   requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
   description: 'Initial program planning and expectations',
-  // Year-gated offset (kept as data; the gating logic stays in code).
-  offsetOverrideFromYear: { fromYear: overrideFromYear, offset: before(600) },
 });
 
 const meetingRules = {
-  'Spring Program': [introMeeting(2029), ...commonSpringFall()],
-  'Fall Program':   [introMeeting(2028), ...commonSpringFall()],
+  'Spring Program': [introMeeting(17, 'forward'), ...commonSpringFall()],
+  'Fall Program':   [introMeeting(18, 'nearest'), ...commonSpringFall()],
   'Kleindagarna': [
     {
       id: 'klein_bp', name: 'Meeting with organizer and B&P',

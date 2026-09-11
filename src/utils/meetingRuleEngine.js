@@ -11,7 +11,8 @@
 //     offsetOverrideFromYear?: { fromYear, offset } }
 
 // Pick the effective offset, applying a year-gated override when present
-// (e.g. Introduction Meeting moves from 540d to 600d before start for FP28+/SP29+).
+// (a rule whose offset changes from a given program year). No seeded rule uses it
+// since 2026-09, when the Introduction Meeting's 600-day override was removed.
 function effectiveOffset(rule, programYear) {
   const ovr = rule.offsetOverrideFromYear;
   if (ovr && programYear != null && programYear >= ovr.fromYear) return ovr.offset;

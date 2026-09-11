@@ -71,13 +71,15 @@ When program data is uploaded, the system automatically creates meetings based o
 
 | Meeting | When | Duration | Participants |
 |---------|------|----------|-------------|
-| Introduction Meeting | ~18 months before start (Friday, 10:00) | 30 min | Organizers, Directors, Admin |
-| Check-in with organizers | ~6 months before (Friday, 10:00) | 30 min | Organizers, Admin, Directors |
-| Check-in junior fellows | ~6 months before (Friday, 10:30) | 30 min | Junior Fellows, Admin, Directors |
-| Onboarding meeting | Friday before program start | 30 min | Admin, Organizers, Directors |
-| Program Start Meeting | Program start day | 30 min | Organizers, All Participants, Directors |
-| Mid-term meeting | ~6 weeks in (Friday) | 30 min | Organizers, Admin, Directors |
-| Evaluation meeting/lunch | Last Friday before end (12:00) | 90 min | Organizers, Directors |
+| Introduction Meeting | ~1.5 years before start — spring 17 months, fall 18 months (Friday, 10:00) | 30 min | Organizers, Directors, Admin |
+| Check-in with organizers | 3 months before start (Friday on or before, 10:00) | 30 min | Organizers, Admin, Directors |
+| Check-in junior fellows | 3 months before start (same Friday, 10:30) | 30 min | Junior Fellows, Admin, Directors |
+| Onboarding meeting | First Friday after program start | 30 min | Admin, Organizers, Directors |
+| Program Start Meeting | First Tuesday after program start | 30 min | Organizers, All Participants, Directors |
+| Mid-term meeting | 7 weeks after start (Friday) | 30 min | Organizers, Admin, Directors |
+| Evaluation meeting/lunch | Friday two weeks before program end (12:00) | 90 min | Organizers, Directors |
+
+These are the defaults as of September 2026. They follow IML's working-process document (*Arbetsprocesser programverksamhet IML* in ProjectPlace), which is the authority: when the document changes, change the rules in **Settings** to match. Dates falling on Swedish public holidays move a week in the rule's direction (e.g. a mid-term on Good Friday moves to the following Friday).
 
 ### Summer Conference
 
