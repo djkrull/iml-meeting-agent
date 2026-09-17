@@ -18,13 +18,22 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 // ---------------------------------------------------------------------------
 // ONE-OFF 2027 EXCEPTION — SC27 Special Introduction/Check-in meetings.
 //
-// Three of the ten 2027 Summer Conferences run back-to-back with "Minneshögtid
-// GML 100 år" (Gösta Mittag-Leffler's 100-year jubilee). That jubilee is NOT a
-// row in this app's `programs` table — memorial events are excluded by design
-// (see CLAUDE.md "Memorial events"). Its organizers, plus the jubilee's own
-// contact, need an extra Introduction/Check-in meeting 14 days before the
-// ordinary shared Summer Conference one (before(240)/before(90) + Friday
-// snap), as ONE meeting each — no Group 1/Group 2 split.
+// The first three of the ten 2027 Summer Conferences ("special conferences")
+// are a group of their own. Their organizers get their own Introduction/
+// Check-in meeting 14 days before the ordinary shared Summer Conference one
+// (before(240)/before(90) + Friday snap), as ONE meeting each — no Group 1/
+// Group 2 split — and are left out of the ordinary shared meetings, which are
+// for the other seven conferences only.
+//
+// The two groups are distinguished as "the first three" vs "the ordinary"
+// conferences and nothing else: no event outside the ten conferences is part
+// of this, in names, roles, descriptions or invitation texts (decided
+// 2026-09-17).
+//
+// The ordinary shared meetings still take their DATE from the year's earliest
+// conference, which is one of the first three — kept on purpose (2026-09-17)
+// so the already-planned 2 Oct / 26 Feb dates do not move. Only their
+// organizer list excludes the first three.
 //
 // Deliberately NOT a meetingRules['Summer Conference'] entry: every rule there
 // applies to ALL Summer Conference programs of every year, and this is a
@@ -42,16 +51,16 @@ const SC27_SPECIAL_RULES = [
     offset: { amount: 254, unit: 'days', direction: 'before' }, // ordinary 240 + 14
     placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
     time: '11:00', duration: 30,
-    participants: ['SC27 Conference Organizers', 'GML100 Jubilee Contact', 'Admin Team', 'Directors'],
-    description: 'Initial planning — the three SC27 conferences held alongside the GML 100-year jubilee',
+    participants: ['SC27 Special Conference Organizers', 'Admin Team', 'Directors'],
+    description: 'Initial planning — the first three 2027 summer conferences',
   },
   {
     name: 'SC27 Special Check-in Meeting',
     offset: { amount: 104, unit: 'days', direction: 'before' }, // ordinary 90 + 14
     placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
     time: '11:00', duration: 30,
-    participants: ['SC27 Conference Organizers', 'GML100 Jubilee Contact', 'Admin Team'],
-    description: 'Pre-conference preparations review — the three SC27 conferences held alongside the GML 100-year jubilee',
+    participants: ['SC27 Special Conference Organizers', 'Admin Team'],
+    description: 'Pre-conference preparations review — the first three 2027 summer conferences',
   },
 ];
 
@@ -983,11 +992,15 @@ const MeetingAgent = () => {
 
               let organizers = program.organizer;
 
-              // For Summer Conferences, collect all organizers from the same year
+              // For Summer Conferences, collect all organizers from the same year —
+              // except the first three 2027 conferences, which have their own
+              // meetings (see SC27_SPECIAL_RULES). The DATE above is still taken
+              // from the triggering program, so it does not move.
               if (program.type === 'Summer Conference') {
                 const currentYear = program.startDate.getFullYear();
                 const allOrganizersList = programList
-                  .filter(p => p.type === 'Summer Conference' && p.startDate.getFullYear() === currentYear)
+                  .filter(p => p.type === 'Summer Conference' && p.startDate.getFullYear() === currentYear &&
+                    !sc27SpecialPrograms.includes(p))
                   .map(p => p.organizer)
                   .filter((org, idx, self) => self.indexOf(org) === idx); // Unique
                 organizers = allOrganizersList.join(' / ');
