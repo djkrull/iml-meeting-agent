@@ -258,6 +258,24 @@ async function initializePostgresDatabase() {
       console.log('Migration note (lock):', migrationError.message);
     }
 
+    // Migration: EXTRA meetings — one-off meetings added by hand ("Lägg till
+    // möte"), not produced by any rule.
+    //
+    // "Regenerera" deletes every future row and re-inserts what the rules
+    // produce, so a hand-added meeting would silently vanish on the next press.
+    // The marker has to live in the database for the same reason as the lock:
+    // the protection must hold for whoever presses the button next.
+    try {
+      await pool.query(`
+        ALTER TABLE program_meetings
+        ADD COLUMN IF NOT EXISTS custom_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS custom_by TEXT
+      `);
+      console.log('extra meeting migration completed');
+    } catch (migrationError) {
+      console.log('Migration note (custom):', migrationError.message);
+    }
+
     // Migration: Ensure unique CONSTRAINTS exist (not just indexes).
     // ON CONFLICT ON CONSTRAINT requires an actual named CONSTRAINT, not a plain
     // UNIQUE INDEX — this caused silent INSERT failures in production previously.
@@ -378,6 +396,8 @@ function initializeSQLiteDatabase() {
         invitation_sent_for_time TEXT,
         locked_at TEXT,
         locked_by TEXT,
+        custom_at TEXT,
+        custom_by TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
@@ -387,7 +407,7 @@ function initializeSQLiteDatabase() {
     // SQLite has no ADD COLUMN IF NOT EXISTS; the error on an existing column
     // is expected and ignored.
     ['invitation_sent_at', 'invitation_sent_by', 'invitation_sent_for_date', 'invitation_sent_for_time',
-     'locked_at', 'locked_by']
+     'locked_at', 'locked_by', 'custom_at', 'custom_by']
       .forEach(col => db.run(`ALTER TABLE program_meetings ADD COLUMN ${col} TEXT`, () => {}));
 
     // Same uniqueness as production, so local dev can upsert instead of
@@ -536,7 +556,7 @@ const dbHelpers = {
             `DELETE FROM program_meetings
              WHERE (date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Stockholm')::date
                    >= (now() AT TIME ZONE 'Europe/Stockholm')::date
-               AND locked_at IS NULL`
+               AND locked_at IS NULL AND custom_at IS NULL`
           );
           // Locked rows survived the delete; skip them on the way back in so a
           // regenerated date can never overwrite one. Their identity is the
@@ -553,8 +573,8 @@ const dbHelpers = {
             if (lockedKeys.has(m.programName + '|' + m.type)) { skipped++; continue; }
             const meetingDate = typeof m.date === 'string' ? m.date : m.date.toISOString();
             await client.query(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by, custom_at, custom_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
                ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
                DO UPDATE SET time = EXCLUDED.time, duration = EXCLUDED.duration,
                  participants = EXCLUDED.participants, description = EXCLUDED.description,
@@ -565,7 +585,8 @@ const dbHelpers = {
                m.description, m.status || 'pending', m.approved || false, now, now,
                m.invitationSentAt || null, m.invitationSentBy || null,
                m.invitationSentForDate || null, m.invitationSentForTime || null,
-               m.lockedAt || null, m.lockedBy || null]
+               m.lockedAt || null, m.lockedBy || null,
+               m.customAt || null, m.customBy || null]
             );
           }
           await client.query('COMMIT');
@@ -584,11 +605,11 @@ const dbHelpers = {
           if (lockErr) return reject(lockErr);
           const lockedKeys = new Set((lockedRows || []).map(r => r.program_name + '|' + r.type));
           let skipped = 0;
-          db.run('DELETE FROM program_meetings WHERE date >= ? AND locked_at IS NULL', [todayIso], (delErr) => {
+          db.run('DELETE FROM program_meetings WHERE date >= ? AND locked_at IS NULL AND custom_at IS NULL', [todayIso], (delErr) => {
             if (delErr) return reject(delErr);
             const stmt = db.prepare(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by, custom_at, custom_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             list.forEach(m => {
               if (lockedKeys.has(m.programName + '|' + m.type)) { skipped++; return; }
@@ -598,7 +619,8 @@ const dbHelpers = {
                 m.description, m.status || 'pending', m.approved ? 1 : 0, now, now,
                 m.invitationSentAt || null, m.invitationSentBy || null,
                 m.invitationSentForDate || null, m.invitationSentForTime || null,
-                m.lockedAt || null, m.lockedBy || null);
+                m.lockedAt || null, m.lockedBy || null,
+                m.customAt || null, m.customBy || null);
             });
             stmt.finalize((finErr) => finErr
               ? reject(finErr)
@@ -722,6 +744,87 @@ const dbHelpers = {
           db.run(sql, [lockedAt, lockedBy, now, programName, type, date], function (err) {
             if (err) return reject(err);
             resolve({ updated: this.changes, lockedAt, lockedBy });
+          });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Add ONE extra meeting by hand — a one-off that no rule produces.
+  //
+  // Marked with custom_at so "Regenerera" leaves it alone (its DELETE skips
+  // custom rows). A plain INSERT, never an upsert: an occupied
+  // (program_name, type, date) slot is reported as { conflict: true } instead
+  // of silently overwriting the meeting that is already there. The meeting_id
+  // is the next free one; ids are not unique anyway (see meetingIdentity.js),
+  // but a fresh one keeps the review sync's id fallback from hitting a rule
+  // meeting.
+  addCustomMeeting: (m, byId) => {
+    return new Promise(async (resolve, reject) => {
+      const now = new Date().toISOString();
+      const customBy = byId || null;
+      const cols = `meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, custom_at, custom_by`;
+      try {
+        if (USE_POSTGRES) {
+          const maxRes = await pool.query('SELECT COALESCE(MAX(meeting_id), 0) + 1 AS next FROM program_meetings');
+          const meetingId = Number(maxRes.rows[0].next);
+          try {
+            await pool.query(
+              `INSERT INTO program_meetings (${cols})
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', false, $13, $13, $13, $14)`,
+              [meetingId, m.programId || null, m.programName, m.programType, m.programYear || null,
+               m.programOrganizer || null, m.type, m.date, m.time, m.duration,
+               JSON.stringify(m.participants || []), m.description || null, now, customBy]
+            );
+          } catch (err) {
+            if (err.code === '23505') return resolve({ conflict: true });
+            throw err;
+          }
+          resolve({ id: meetingId, customAt: now, customBy });
+        } else {
+          db.get('SELECT COALESCE(MAX(meeting_id), 0) + 1 AS next FROM program_meetings', (maxErr, row) => {
+            if (maxErr) return reject(maxErr);
+            const meetingId = row.next;
+            db.run(
+              `INSERT INTO program_meetings (${cols})
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)`,
+              [meetingId, m.programId || null, m.programName, m.programType, m.programYear || null,
+               m.programOrganizer || null, m.type, m.date, m.time, m.duration,
+               JSON.stringify(m.participants || []), m.description || null, now, now, now, customBy],
+              (err) => {
+                if (err && /UNIQUE/i.test(err.message)) return resolve({ conflict: true });
+                if (err) return reject(err);
+                resolve({ id: meetingId, customAt: now, customBy });
+              }
+            );
+          });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Remove an extra meeting. Only rows marked custom can be removed this way —
+  // a rule meeting deleted here would simply come back on the next Regenerera,
+  // so allowing it would only invite confusion.
+  deleteCustomMeeting: ({ programName, type, date }) => {
+    return new Promise(async (resolve, reject) => {
+      const sql = USE_POSTGRES
+        ? `DELETE FROM program_meetings
+            WHERE program_name = $1 AND type = $2 AND date = $3 AND custom_at IS NOT NULL`
+        : `DELETE FROM program_meetings
+            WHERE program_name = ? AND type = ? AND date = ? AND custom_at IS NOT NULL`;
+      try {
+        if (USE_POSTGRES) {
+          const res = await pool.query(sql, [programName, type, date]);
+          resolve({ deleted: res.rowCount });
+        } else {
+          db.run(sql, [programName, type, date], function (err) {
+            if (err) return reject(err);
+            resolve({ deleted: this.changes });
           });
         }
       } catch (err) {
@@ -1636,8 +1739,8 @@ const dbHelpers = {
 
             try {
               await pool.query(
-                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by, custom_at, custom_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
                  ON CONFLICT ON CONSTRAINT program_meetings_unique_idx
                  DO UPDATE SET
                    time = EXCLUDED.time,
@@ -1654,7 +1757,8 @@ const dbHelpers = {
                  meeting.description, meeting.status, meeting.approved || false, now, now,
                  meeting.invitationSentAt || null, meeting.invitationSentBy || null,
                  meeting.invitationSentForDate || null, meeting.invitationSentForTime || null,
-                 meeting.lockedAt || null, meeting.lockedBy || null]
+                 meeting.lockedAt || null, meeting.lockedBy || null,
+                 meeting.customAt || null, meeting.customBy || null]
               );
               meetingsInserted++;
             } catch (err) {
@@ -1705,8 +1809,8 @@ const dbHelpers = {
             programStmt.finalize();
 
             const meetingStmt = db.prepare(
-              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `INSERT INTO program_meetings (meeting_id, program_id, program_name, program_type, program_year, program_organizer, type, date, time, duration, participants, description, status, approved, created_at, updated_at, invitation_sent_at, invitation_sent_by, invitation_sent_for_date, invitation_sent_for_time, locked_at, locked_by, custom_at, custom_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(program_name, type, date) DO UPDATE SET
                  time = excluded.time,
                  duration = excluded.duration,
@@ -1730,7 +1834,8 @@ const dbHelpers = {
                 meeting.description, meeting.status, meeting.approved ? 1 : 0, now, now,
                 meeting.invitationSentAt || null, meeting.invitationSentBy || null,
                 meeting.invitationSentForDate || null, meeting.invitationSentForTime || null,
-                meeting.lockedAt || null, meeting.lockedBy || null
+                meeting.lockedAt || null, meeting.lockedBy || null,
+                meeting.customAt || null, meeting.customBy || null
               );
             });
 
@@ -1785,7 +1890,9 @@ const dbHelpers = {
             invitationSentForDate: m.invitation_sent_for_date,
             invitationSentForTime: m.invitation_sent_for_time,
             lockedAt: m.locked_at,
-            lockedBy: m.locked_by
+            lockedBy: m.locked_by,
+            customAt: m.custom_at,
+            customBy: m.custom_by
           }));
 
           resolve({ programs, meetings });
@@ -1830,7 +1937,9 @@ const dbHelpers = {
                     invitationSentForDate: m.invitation_sent_for_date,
                     invitationSentForTime: m.invitation_sent_for_time,
                     lockedAt: m.locked_at,
-                    lockedBy: m.locked_by
+                    lockedBy: m.locked_by,
+                    customAt: m.custom_at,
+                    customBy: m.custom_by
                   }));
 
                   resolve({ programs, meetings });

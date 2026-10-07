@@ -106,6 +106,63 @@ router.post('/lock', async (req, res) => {
   }
 });
 
+// Add an EXTRA meeting — a one-off that no rule produces. Its own endpoint, never
+// the meetings auto-save: the row is marked custom so "Regenerera" keeps it, and
+// that marker is a shared fact a stale tab must not be able to drop.
+router.post('/custom-meeting', async (req, res) => {
+  try {
+    const { meeting, byId } = req.body;
+    const m = meeting || {};
+    const missing = ['programName', 'programType', 'type', 'date', 'time']
+      .filter(f => !m[f] || !String(m[f]).trim());
+    if (missing.length > 0) {
+      return res.status(400).json({ error: `Missing: ${missing.join(', ')}` });
+    }
+    if (isNaN(new Date(m.date).getTime())) {
+      return res.status(400).json({ error: 'date is not a valid date' });
+    }
+    if (!/^\d{2}:\d{2}$/.test(m.time)) {
+      return res.status(400).json({ error: 'time must be HH:MM' });
+    }
+    const duration = Number(m.duration);
+    if (!Number.isInteger(duration) || duration <= 0) {
+      return res.status(400).json({ error: 'duration must be a positive number of minutes' });
+    }
+    const clean = Object.assign({}, m, {
+      programName: String(m.programName).trim(),
+      type: String(m.type).trim(),
+      duration,
+      participants: Array.isArray(m.participants) ? m.participants : [],
+    });
+    const result = await dbHelpers.addCustomMeeting(clean, byId);
+    if (result.conflict) {
+      return res.status(409).json({ error: 'A meeting of that type already exists for that program on that date' });
+    }
+    console.log(`[CUSTOM] Added ${clean.type} / ${clean.programName} @ ${clean.date} ${clean.time}`);
+    res.status(201).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error adding extra meeting:', error);
+    res.status(500).json({ error: 'Failed to add meeting', details: error.message });
+  }
+});
+
+// Remove an extra meeting. Rule meetings are refused (deleted: 0) — Regenerera
+// would only bring them back.
+router.post('/custom-meeting/delete', async (req, res) => {
+  try {
+    const { programName, type, date } = req.body;
+    if (!programName || !type || !date) {
+      return res.status(400).json({ error: 'programName, type and date are required' });
+    }
+    const result = await dbHelpers.deleteCustomMeeting({ programName, type, date });
+    console.log(`[CUSTOM] Deleted ${type} / ${programName} @ ${date} (${result.deleted} row(s))`);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error deleting extra meeting:', error);
+    res.status(500).json({ error: 'Failed to delete meeting', details: error.message });
+  }
+});
+
 // Mark / unmark that the official Outlook invitation has been sent.
 // Its own endpoint, never the meetings auto-save: this is a shared fact and a
 // stale tab must not be able to overwrite it.

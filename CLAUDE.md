@@ -111,6 +111,15 @@ Three symptoms this caused on the dashboard (all fixed 2026-08, all traced to th
 ### Regenerate
 "Regenerera" on the dashboard recomputes future meeting dates from current rules, shows a diff, and applies via `POST /api/programs/replace-meetings` — a **transactional delete-future-then-insert** so a date-shifted meeting can't leave a stale duplicate under the `(program_name, type, date)` unique constraint. Past meetings are preserved.
 
+### Extra meetings — one-offs no rule produces ("Lägg till möte")
+Dashboard button **Lägg till möte** → `POST /api/programs/custom-meeting` → `dbHelpers.addCustomMeeting`. The row gets `program_meetings.custom_at` / `custom_by`, and **that marker is what keeps it through "Regenerera"**: `replaceFutureMeetings`' DELETE skips `custom_at IS NOT NULL`, and the frontend diff keeps them out of "Tas bort". Same pattern as the lock — own endpoint, never the auto-save, excluded from `scheduleSignature`, carried by every INSERT path.
+
+- A plain INSERT (409 on an occupied `(program_name, type, date)` slot), never an upsert, so it can't overwrite an existing meeting.
+- `validateCustomMeeting` ([meetingIdentity.js](src/utils/meetingIdentity.js)) refuses a **rule meeting's name** for the program's type: Regenerera matches on program + type, so an "extra" Mid-term meeting would collide with or pass for the rule one. A rule meeting that must move should be moved, not duplicated.
+- Optional "Visa för direktörerna" → `POST /api/reviews/:id/add-meeting` (sync-meeting only updates existing review rows; re-sharing would wipe every answer).
+- **Remove** (`POST /api/programs/custom-meeting/delete`) only deletes custom rows. It does not remove the meeting's copy in an already-shared review.
+- Other open tabs see a new extra meeting only after a reload — the focus re-sync updates/drops rows but never adds them.
+
 ### Active-review pointer
 Creating/updating a review records `activeReviewId` in config; `GET /api/reviews/active` lets any admin device converge on the latest shared review instead of a stale localStorage id.
 

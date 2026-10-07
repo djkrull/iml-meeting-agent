@@ -197,9 +197,55 @@ function isLocked(m) {
   return !!(m && m.lockedAt);
 }
 
+// ---------------------------------------------------------------------------
+// Extra meetings — one-offs added by hand, not produced by any rule.
+//
+// `customAt` is set by POST /api/programs/custom-meeting and is what keeps the
+// row through "Regenerera" (whose DELETE skips custom rows). Like the lock it is
+// written through its own endpoint and stays out of scheduleSignature.
+function isCustomMeeting(m) {
+  return !!(m && m.customAt);
+}
+
+// Problems with an extra-meeting form, as user-facing (Swedish) strings; an
+// empty array means it can be saved.
+//
+// `ruleNames` are the meeting names the rules produce for the chosen program
+// type. An extra meeting must not share one: Regenerera matches meetings on
+// program + type, so it would either collide with the rule meeting or pass for
+// it — and a rule meeting that has to move should simply be moved.
+function validateCustomMeeting(form, meetings, ruleNames, today) {
+  const errors = [];
+  const f = form || {};
+  const programName = String(f.programName || '').trim();
+  const type = String(f.type || '').trim();
+  if (!programName) errors.push('Välj ett program eller skriv ett namn.');
+  if (!type) errors.push('Ange vad mötet heter.');
+  if (!isCompleteDateKey(f.dateKey || '')) {
+    errors.push('Ange ett fullständigt datum.');
+  } else {
+    const t = today ? new Date(today) : new Date();
+    t.setHours(0, 0, 0, 0);
+    if (dateFromKey(f.dateKey) < t) errors.push('Datumet har redan passerat.');
+  }
+  if (!/^\d{2}:\d{2}$/.test(f.time || '')) errors.push('Ange en tid (TT:MM).');
+  const duration = Number(f.duration);
+  if (!Number.isInteger(duration) || duration <= 0) errors.push('Längden ska vara ett antal minuter.');
+
+  if (type && (ruleNames || []).some(n => String(n).trim().toLowerCase() === type.toLowerCase())) {
+    errors.push(`"${type}" är ett regelstyrt möte. Flytta det befintliga mötet i stället för att lägga till ett nytt.`);
+  }
+  if (programName && type && isCompleteDateKey(f.dateKey || '')) {
+    const clash = (meetings || []).some(m =>
+      m.programName === programName && m.type === type && localDateKey(m.date) === f.dateKey);
+    if (clash) errors.push('Det finns redan ett sådant möte för programmet den dagen.');
+  }
+  return errors;
+}
+
 module.exports = {
   localDateKey, dateFromKey, meetingKey, isSameMeeting,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings,
-  invitationStatus, isLocked,
+  invitationStatus, isLocked, isCustomMeeting, validateCustomMeeting,
 };

@@ -90,6 +90,34 @@ clashing.forEach(m => {
 });
 check('a real double-booking is still detected', groups2, 1);
 
+console.log('\n=== Extra meetings (not rule-driven) ===');
+const { isCustomMeeting, validateCustomMeeting, scheduleSignature } = require('./src/utils/meetingIdentity');
+const TODAY = new Date(2026, 9, 7); // 7 Oct 2026, local
+const okForm = { programName: PROGRAM, type: 'Extra planning meeting', dateKey: '2026-11-12', time: '13:00', duration: 45 };
+const fallRules = ['Onboarding meeting', 'Program Start Meeting', 'Mid-term meeting'];
+check('a complete form is valid', validateCustomMeeting(okForm, [], fallRules, TODAY).length, 0);
+check('a past date is refused',
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-10-06' }), [], fallRules, TODAY).length, 1);
+check('today is allowed',
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-10-07' }), [], fallRules, TODAY).length, 0);
+check('a half-typed date is refused',
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '0202-11-12' }), [], fallRules, TODAY).length, 1);
+check('a rule name is refused (case-insensitive) — Regenerera would treat it as the rule meeting',
+  validateCustomMeeting(Object.assign({}, okForm, { type: ' mid-term MEETING ' }), [], fallRules, TODAY).length, 1);
+check('a bad time and zero minutes are both reported',
+  validateCustomMeeting(Object.assign({}, okForm, { time: '9', duration: 0 }), [], fallRules, TODAY).length, 2);
+// Stored at Stockholm-local midnight (23:00Z the day before in CET) — the clash
+// check must compare the LOCAL day, or it would miss this one.
+const existingExtra = { programName: PROGRAM, type: 'Extra planning meeting', date: new Date('2026-11-11T23:00:00.000Z'), time: '10:00' };
+check('the same meeting on the same local day is refused',
+  validateCustomMeeting(okForm, [existingExtra], fallRules, TODAY).length, 1);
+check('...but another day is fine',
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-11-13' }), [existingExtra], fallRules, TODAY).length, 0);
+check('customAt marks an extra meeting', isCustomMeeting({ customAt: '2026-10-07T10:00:00Z' }), true);
+check('a rule meeting is not extra', isCustomMeeting(onboardingNew), false);
+check('customAt stays out of the auto-save signature',
+  scheduleSignature(Object.assign({}, onboardingNew, { customAt: 'x' })), scheduleSignature(onboardingNew));
+
 console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
 console.log(fail === 0 ? 'MEETING IDENTITY OK' : 'MEETING IDENTITY FAILED');
 process.exit(fail === 0 ? 0 : 1);
