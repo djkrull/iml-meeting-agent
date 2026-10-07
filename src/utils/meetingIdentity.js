@@ -116,7 +116,8 @@ function applyScheduleChange(meetings, key, changes) {
 //
 // The fix is to send only rows whose PERSISTED fields actually changed against
 // what the server is known to hold. Approval-derived fields (approved,
-// approvals, adminApprovals, approvedCount, rejectedCount, reviewMeetingId) are
+// approvals, adminApprovals, approvedCount, rejectedCount, reviewMeetingId,
+// reviewStale) are
 // deliberately excluded: they are re-derived from the review on every refresh,
 // so including them would make that read-only poll trigger a write again. The
 // admin's own approve/schedule toggles all move `status` as well, so deliberate
@@ -243,9 +244,53 @@ function validateCustomMeeting(form, meetings, ruleNames, today) {
   return errors;
 }
 
+// ---------------------------------------------------------------------------
+// Matching a schedule meeting to its row in the director review.
+//
+// The review (`meetings`, keyed by review_id) is a snapshot taken at share time.
+// Responses belong to a specific date, so a schedule meeting only matches a
+// review row on the same program, type AND Stockholm-local day — otherwise a
+// moved meeting inherits answers given for the old date.
+//
+// When the schedule moves without the review following (a rule change applied
+// directly to program_meetings on 2026-09-10 moved seven meetings this way), the
+// same-day match finds nothing. The card then used to hide the attendance
+// control without a word, and the "Sync & Clear Approvals" button with it, since
+// that one also depends on the match. `stale` reports the review row that is
+// still sitting on the old date, so the card can say so and offer the sync.
+// Only an unambiguous row counts: with two candidates we cannot know which one
+// the schedule meeting came from.
+function matchReviewRow(reviewMeetings, meeting) {
+  const sameMeeting = (reviewMeetings || []).filter(r =>
+    r.program_name === meeting.programName && r.type === meeting.type);
+  const day = localDateKey(meeting.date);
+  const row = sameMeeting.find(r => localDateKey(r.date) === day) || null;
+  if (row) return { row, stale: null };
+  if (sameMeeting.length !== 1) return { row: null, stale: null };
+  const other = sameMeeting[0];
+  return {
+    row: null,
+    stale: {
+      id: other.id,
+      date: localDateKey(other.date),
+      time: other.time,
+      approvals: other.approvals || [],
+    },
+  };
+}
+
+// Cheap equality for the approval merge's "nothing changed → keep the same
+// object" check, so a stale notice doesn't re-render (and re-save) every poll.
+function sameReviewStale(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.id === b.id && a.date === b.date && a.time === b.time &&
+    a.approvals.length === b.approvals.length;
+}
+
 module.exports = {
   localDateKey, dateFromKey, meetingKey, isSameMeeting,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings,
   invitationStatus, isLocked, isCustomMeeting, validateCustomMeeting,
+  matchReviewRow, sameReviewStale,
 };

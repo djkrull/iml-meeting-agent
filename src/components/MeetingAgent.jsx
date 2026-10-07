@@ -10,6 +10,7 @@ import {
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus, isLocked,
   isCustomMeeting, validateCustomMeeting,
+  matchReviewRow, sameReviewStale,
 } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
@@ -17,52 +18,41 @@ const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 // ---------------------------------------------------------------------------
-// ONE-OFF 2027 EXCEPTION — SC27 Special Introduction/Check-in meetings.
+// ONE-OFF 2027 EXCEPTION — SC27 special conferences left out of the shared meetings.
 //
-// The first three of the ten 2027 Summer Conferences ("special conferences")
-// are a group of their own. Their organizers get their own Introduction/
-// Check-in meeting 14 days before the ordinary shared Summer Conference one
-// (before(240)/before(90) + Friday snap), as ONE meeting each — no Group 1/
-// Group 2 split — and are left out of the ordinary shared meetings, which are
-// for the other seven conferences only.
+// Four 2027 events are "special": 24-28 May (Universality), 31 May - 4 Jun
+// (Minneshögtid), 7-11 Jun (Geometric flows) and 28 Jun - 2 Jul (Homotopy,
+// geometry, and arithmetic; added 2026-10-02) — user decision 2026-09-29,
+// replacing the 2026-09-17 "first three conferences" split that had AI for
+// Mathematics (14-18 Jun) in it. AI for Mathematics is an ordinary conference
+// and is invited to the ordinary shared meetings on purpose.
 //
-// The two groups are distinguished as "the first three" vs "the ordinary"
-// conferences and nothing else: no event outside the ten conferences is part
-// of this, in names, roles, descriptions or invitation texts (decided
-// 2026-09-17).
+// The special group is left out of the ordinary shared Introduction/Check-in
+// meetings and gets NO Introduction or Check-in meeting of its own (decided
+// 2026-10-02 with Hans Ringström and Sofie Upmark): they are experienced
+// organizers and are told by e-mail instead, with only the participant-list
+// (15 Oct) and schedule (1 Apr) deadlines. The earlier SC27 Special
+// Introduction/Check-in rules were removed.
+//
+// Minneshögtid never reaches programList (memorial events are filtered out on
+// import), so only three of the four ranges match a program; its organizer is
+// already among Geometric flows' organizers.
 //
 // The ordinary shared meetings still take their DATE from the year's earliest
-// conference, which is one of the first three — kept on purpose (2026-09-17)
-// so the already-planned 2 Oct / 26 Feb dates do not move. Only their
-// organizer list excludes the first three.
+// conference, which is a special one — kept on purpose (2026-09-17) so the
+// already-planned 2 Oct / 26 Feb dates do not move. Only their organizer list
+// excludes the special group.
 //
 // Deliberately NOT a meetingRules['Summer Conference'] entry: every rule there
 // applies to ALL Summer Conference programs of every year, and this is a
-// single-year, three-program exception — see CLAUDE.md's "config not
+// single-year, three-event exception — see CLAUDE.md's "config not
 // hardcode" rule, which this block is a narrow, deliberate exception to.
 // REMOVE after the 2027 Summer Conference season.
 const SC27_SPECIAL_DATE_RANGES_2027 = [
   { from: '2027-05-23', to: '2027-05-27', nameHint: 'universality' },
+  { from: '2027-05-30', to: '2027-06-03', nameHint: 'minneshögtid', inProgramList: false },
   { from: '2027-06-06', to: '2027-06-10', nameHint: 'geometric flows' },
-  { from: '2027-06-13', to: '2027-06-17', nameHint: 'ai for mathematics' },
-];
-const SC27_SPECIAL_RULES = [
-  {
-    name: 'SC27 Special Introduction Meeting',
-    offset: { amount: 254, unit: 'days', direction: 'before' }, // ordinary 240 + 14
-    placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
-    time: '11:00', duration: 30,
-    participants: ['SC27 Special Conference Organizers', 'Admin Team', 'Directors'],
-    description: 'Initial planning — the first three 2027 summer conferences',
-  },
-  {
-    name: 'SC27 Special Check-in Meeting',
-    offset: { amount: 104, unit: 'days', direction: 'before' }, // ordinary 90 + 14
-    placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
-    time: '11:00', duration: 30,
-    participants: ['SC27 Special Conference Organizers', 'Admin Team'],
-    description: 'Pre-conference preparations review — the first three 2027 summer conferences',
-  },
+  { from: '2027-06-27', to: '2027-07-01', nameHint: 'homotopy' },
 ];
 
 // Inline date/time editor for one meeting in the timeline.
@@ -407,14 +397,21 @@ const MeetingAgent = () => {
             // old row still existed) the new date inherited the OLD date's
             // approvals — showing "2/2 directors" for answers nobody gave.
             // Approvals belong to a specific date; if the review row hasn't been
-            // synced yet the card correctly shows none until it is.
-            const dbMeeting = review.meetings.find(m =>
-              m.program_name === meeting.programName &&
-              m.type === meeting.type &&
-              localDateKey(m.date) === localDateKey(meeting.date)
-            );
+            // synced yet the card correctly shows none until it is — and says so
+            // via `reviewStale`, instead of just hiding the attendance control.
+            const { row: dbMeeting, stale } = matchReviewRow(review.meetings, meeting);
 
-            if (!dbMeeting) return meeting;
+            if (!dbMeeting) {
+              if (!stale || (sameReviewStale(meeting.reviewStale || null, stale) && !meeting.reviewMeetingId)) {
+                return meeting;
+              }
+              // The review still holds this meeting on another date. Drop what an
+              // earlier match left behind, or attendance would keep being written
+              // to the old date's row and its answers shown on the new one.
+              changed = true;
+              return { ...meeting, reviewStale: stale, reviewMeetingId: null,
+                approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 };
+            }
 
             // Only director responses gate approval; admin responses are attendance.
             const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -442,13 +439,14 @@ const MeetingAgent = () => {
               meeting.approved === approved &&
               (meeting.approvals?.length || 0) === approvals.length &&
               (meeting.adminApprovals?.length || 0) === adminApprovals.length &&
-              meeting.reviewMeetingId === dbMeeting.id
+              meeting.reviewMeetingId === dbMeeting.id &&
+              !meeting.reviewStale
             ) {
               return meeting;
             }
 
             changed = true;
-            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved, reviewMeetingId: dbMeeting.id };
+            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved, reviewMeetingId: dbMeeting.id, reviewStale: null };
           });
 
           // Nothing changed → return the SAME array so no re-render / no auto-save.
@@ -917,14 +915,16 @@ const MeetingAgent = () => {
       return Array.isArray(rules) ? rules : [];
     };
 
-    // One-off SC27 (2027) special meetings — see constants above generateMeetings.
+    // One-off SC27 (2027) special conferences, excluded from the shared summer
+    // meetings below — see the constant at the top of this file.
     const sc27SpecialPrograms = programList.filter(p => {
       if (p.type !== 'Summer Conference' || !p.startDate) return false;
       const ymd = localDateKey(p.startDate); // Stockholm-local day, not UTC
       return SC27_SPECIAL_DATE_RANGES_2027.some(r => ymd >= r.from && ymd <= r.to);
     });
-    if (sc27SpecialPrograms.length > 0 && sc27SpecialPrograms.length !== SC27_SPECIAL_DATE_RANGES_2027.length) {
-      console.warn(`SC27 special meetings: expected ${SC27_SPECIAL_DATE_RANGES_2027.length} matching programs, found ${sc27SpecialPrograms.length}. Check SC27_SPECIAL_DATE_RANGES_2027 against the live programs table.`);
+    const sc27ExpectedPrograms = SC27_SPECIAL_DATE_RANGES_2027.filter(r => r.inProgramList !== false).length;
+    if (sc27SpecialPrograms.length > 0 && sc27SpecialPrograms.length !== sc27ExpectedPrograms) {
+      console.warn(`SC27 special meetings: expected ${sc27ExpectedPrograms} matching programs, found ${sc27SpecialPrograms.length}. Check SC27_SPECIAL_DATE_RANGES_2027 against the live programs table.`);
     }
     sc27SpecialPrograms.forEach(p => {
       const ymd = localDateKey(p.startDate);
@@ -933,37 +933,6 @@ const MeetingAgent = () => {
         console.warn(`SC27 special meetings: program "${p.name}" matched by date but not by expected name hint "${hint}" — verify this is really the right program.`);
       }
     });
-    if (sc27SpecialPrograms.length > 0) {
-      const earliest = sc27SpecialPrograms.reduce((a, b) => (a.startDate <= b.startDate ? a : b));
-      const organizers = sc27SpecialPrograms
-        .map(p => p.organizer)
-        .filter((org, idx, self) => self.indexOf(org) === idx)
-        .join(' / ');
-      SC27_SPECIAL_RULES.forEach(rule => {
-        const meetingDate = resolveMeetingDate(
-          { anchor: 'start', offset: rule.offset, placement: rule.placement },
-          earliest.startDate, earliest.endDate, 2027, { isBlocked }
-        );
-        if (!meetingDate) return;
-        const inheritedTime = getInheritedTime('Summer Conference', rule.name, 2027, rule.time);
-        generatedMeetings.push({
-          id: meetingId++,
-          programId: 'sc27-special-2027',
-          programName: 'SC27 Special Conferences',
-          programType: 'Summer Conference',
-          programYear: 2027,
-          programOrganizer: organizers,
-          type: rule.name,
-          date: meetingDate,
-          time: inheritedTime,
-          duration: rule.duration,
-          participants: rule.participants,
-          description: rule.description,
-          status: 'pending',
-          approved: false,
-        });
-      });
-    }
 
     programList.forEach(program => {
       const programMeetings = getMeetingTypes(program);
@@ -997,8 +966,8 @@ const MeetingAgent = () => {
               let organizers = program.organizer;
 
               // For Summer Conferences, collect all organizers from the same year —
-              // except the first three 2027 conferences, which have their own
-              // meetings (see SC27_SPECIAL_RULES). The DATE above is still taken
+              // except the special 2027 group, which has its own
+              // meetings (see SC27_SPECIAL_DATE_RANGES_2027). The DATE above is still taken
               // from the triggering program, so it does not move.
               if (program.type === 'Summer Conference') {
                 const currentYear = program.startDate.getFullYear();
@@ -1758,11 +1727,7 @@ const MeetingAgent = () => {
           // Match on program + type + DATE — see the same fix in the 30s refresh
           // above. program+type alone let a moved meeting inherit the approvals
           // of the stale row it replaced.
-          const dbMeeting = reviewData.meetings.find(m =>
-            m.program_name === meeting.programName &&
-            m.type === meeting.type &&
-            localDateKey(m.date) === localDateKey(meeting.date)
-          );
+          const { row: dbMeeting, stale } = matchReviewRow(reviewData.meetings, meeting);
 
           if (dbMeeting) {
             const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -1784,10 +1749,14 @@ const MeetingAgent = () => {
               approvals: allApprovals.filter(a => a.role !== 'admin'),
               adminApprovals: allApprovals.filter(a => a.role === 'admin'),
               approved: approvedCount > 0 && rejectedCount === 0,
-              reviewMeetingId: dbMeeting.id
+              reviewMeetingId: dbMeeting.id,
+              reviewStale: null
             };
           }
-          return meeting;
+          return stale
+            ? { ...meeting, reviewStale: stale, reviewMeetingId: null,
+                approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 }
+            : meeting;
         });
       });
 
@@ -2202,6 +2171,56 @@ const MeetingAgent = () => {
     } catch (error) {
       console.error('Error syncing meeting:', error);
       alert('Failed to sync meeting. Make sure the server is running.');
+    }
+  };
+
+  // Bring a review row that is still on an OLD date (meeting.reviewStale) onto the
+  // meeting's current date and time. syncSingleMeeting can't do this: it decides
+  // what to clear from meeting.approvals, which is empty precisely because the
+  // dates don't match — so it would carry the old date's answers onto the new
+  // one. The answers to clear come from the stale row itself.
+  const syncStaleReviewMeeting = async (meeting) => {
+    const stale = meeting.reviewStale;
+    if (!currentReviewId || !stale) return;
+
+    const answers = stale.approvals.length
+      ? stale.approvals.map(a => `  • ${a.director_name}${a.role === 'admin' ? ' (admin)' : ''}: ${a.status}`).join('\n')
+      : '  (no responses)';
+    if (!window.confirm(
+      `The director review still has "${meeting.type}" on ${stale.date} at ${stale.time}.\n\n` +
+      `It will be moved to ${localDateKey(meeting.date)} at ${meeting.time}, and the responses given for the old date are cleared:\n\n${answers}\n\nContinue?`
+    )) return;
+
+    try {
+      const post = (path, body) => fetch(`${API_URL}/api/reviews/${currentReviewId}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(async res => {
+        if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+        return res.json();
+      });
+
+      if (stale.approvals.length) {
+        await post('clear-meeting-approvals', { programName: meeting.programName, meetingType: meeting.type });
+      }
+      const synced = await post('sync-meeting', {
+        programName: meeting.programName,
+        meetingType: meeting.type,
+        date: meeting.date.toISOString(),
+        time: meeting.time
+      });
+      if (!synced.changes) throw new Error('the meeting was not found in the review');
+
+      // The review row keeps its id, so attendance can be recorded right away.
+      const key = meetingKey(meeting);
+      setMeetings(prev => prev.map(m => meetingKey(m) === key
+        ? { ...m, reviewStale: null, reviewMeetingId: stale.id,
+            approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 }
+        : m));
+    } catch (error) {
+      console.error('Error syncing stale review meeting:', error);
+      alert('Could not sync the meeting to the director review (' + error.message + ').');
     }
   };
 
@@ -3868,9 +3887,34 @@ const MeetingAgent = () => {
                           </div>
                         )}
 
+                        {/* The review still has this meeting on its old date, so there is
+                            no row to attach attendance to. Say so instead of silently
+                            leaving the attendance control out. */}
+                        {currentReviewId && meeting.reviewStale && (
+                          <div className="bg-amber-100 text-amber-900 p-3 rounded-lg mt-2 text-sm">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                              <span>
+                                <strong>The director review still has this meeting on {meeting.reviewStale.date} at {meeting.reviewStale.time}.</strong>{' '}
+                                Directors see the old date, and attendance can't be recorded until the review follows the new one.
+                                {meeting.reviewStale.approvals.length > 0 &&
+                                  ` ${meeting.reviewStale.approvals.length} response(s) were given for the old date and will be cleared.`}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => syncStaleReviewMeeting(meeting)}
+                              className="mt-2 px-3 py-1 rounded-lg bg-amber-200 hover:bg-amber-300 transition text-xs font-semibold flex items-center gap-2"
+                              title="Move the meeting in the director review to this date and time, and clear the responses given for the old date."
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              Sync & Clear Responses
+                            </button>
+                          </div>
+                        )}
+
                         {/* Inline control: the CURRENT admin records their own attendance.
                             Only shown when there's an active per-review row to attach it to. */}
-                        {currentReviewId && meeting.reviewMeetingId && adminIdentity && (() => {
+                        {currentReviewId && meeting.reviewMeetingId && !meeting.reviewStale && adminIdentity && (() => {
                           const mine = meeting.adminApprovals?.find(a => a.attendee_id === adminIdentity.id);
                           const isAttending = mine && (mine.status === 'accepted' || mine.status === 'approved');
                           const isDeclined = mine && (mine.status === 'declined' || mine.status === 'rejected');

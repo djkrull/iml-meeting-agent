@@ -90,33 +90,66 @@ clashing.forEach(m => {
 });
 check('a real double-booking is still detected', groups2, 1);
 
+console.log('\n=== Review row on an old date (2026-09-17) ===');
+// FP28's Introduction Meeting was moved 15 Jan -> 5 Mar 2027 straight in
+// program_meetings; review fac16a2c kept 15 Jan with two admin answers. The
+// same-day match found nothing, so the card hid its attendance buttons silently.
+const { matchReviewRow, sameReviewStale } = require('./src/utils/meetingIdentity');
+const FP28 = 'Frontiers in Optimal Control: Geometry, Complexity, and Learning';
+const fp28Intro = { programName: FP28, type: 'Introduction Meeting', date: new Date('2027-03-04T23:00:00.000Z'), time: '10:00' };
+const fp28ReviewRows = [
+  { id: 1447, program_name: FP28, type: 'Introduction Meeting', date: '2027-01-14T23:00:00.000Z', time: '10:00',
+    approvals: [{ director_name: 'Sofie Upmark', status: 'accepted', role: 'admin' }, { director_name: 'Christian Wahlén', status: 'accepted', role: 'admin' }] },
+  { id: 1485, program_name: FP28, type: 'Check-in meeting with organizers', date: '2028-06-01T22:00:00.000Z', time: '14:00', approvals: [] },
+];
+const moved = matchReviewRow(fp28ReviewRows, fp28Intro);
+check('moved meeting has no same-day review row', moved.row, null);
+check('...but the old-date row is reported', moved.stale && moved.stale.id, 1447);
+check('...on its Stockholm-local day', moved.stale && moved.stale.date, '2027-01-15');
+check('...with the answers that were given for that day', moved.stale && moved.stale.approvals.length, 2);
+
+const checkIn = { programName: FP28, type: 'Check-in meeting with organizers', date: new Date('2028-06-01T22:00:00.000Z'), time: '14:00' };
+const inSync = matchReviewRow(fp28ReviewRows, checkIn);
+check('an in-sync meeting matches its row', inSync.row && inSync.row.id, 1485);
+check('...and is not stale', inSync.stale, null);
+
+check('a meeting the review never had is not stale',
+  matchReviewRow(fp28ReviewRows, { programName: FP28, type: 'Mid-term meeting', date: new Date(), time: '14:00' }).stale, null);
+const twoOldRows = fp28ReviewRows.concat([Object.assign({}, fp28ReviewRows[0], { id: 9999, date: '2027-02-11T23:00:00.000Z' })]);
+check('two old-date candidates are ambiguous, not guessed', matchReviewRow(twoOldRows, fp28Intro).stale, null);
+
+check('same stale info compares equal (no re-render per poll)',
+  sameReviewStale(moved.stale, matchReviewRow(fp28ReviewRows, fp28Intro).stale), true);
+check('stale vs none differs', sameReviewStale(moved.stale, null), false);
+check('none vs none is equal', sameReviewStale(null, null), true);
+
 console.log('\n=== Extra meetings (not rule-driven) ===');
 const { isCustomMeeting, validateCustomMeeting, scheduleSignature } = require('./src/utils/meetingIdentity');
 const TODAY = new Date(2026, 9, 7); // 7 Oct 2026, local
-const okForm = { programName: PROGRAM, type: 'Extra planning meeting', dateKey: '2026-11-12', time: '13:00', duration: 45 };
-const fallRules = ['Onboarding meeting', 'Program Start Meeting', 'Mid-term meeting'];
-check('a complete form is valid', validateCustomMeeting(okForm, [], fallRules, TODAY).length, 0);
+const okForm = { programName: FP28, type: 'Extra planning meeting', dateKey: '2026-11-12', time: '13:00', duration: 45 };
+const fp28Rules = ['Introduction Meeting', 'Check-in meeting with organizers', 'Mid-term meeting'];
+check('a complete form is valid', validateCustomMeeting(okForm, [], fp28Rules, TODAY).length, 0);
 check('a past date is refused',
-  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-10-06' }), [], fallRules, TODAY).length, 1);
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-10-06' }), [], fp28Rules, TODAY).length, 1);
 check('today is allowed',
-  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-10-07' }), [], fallRules, TODAY).length, 0);
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-10-07' }), [], fp28Rules, TODAY).length, 0);
 check('a half-typed date is refused',
-  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '0202-11-12' }), [], fallRules, TODAY).length, 1);
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '0202-11-12' }), [], fp28Rules, TODAY).length, 1);
 check('a rule name is refused (case-insensitive) — Regenerera would treat it as the rule meeting',
-  validateCustomMeeting(Object.assign({}, okForm, { type: ' mid-term MEETING ' }), [], fallRules, TODAY).length, 1);
+  validateCustomMeeting(Object.assign({}, okForm, { type: ' mid-term MEETING ' }), [], fp28Rules, TODAY).length, 1);
 check('a bad time and zero minutes are both reported',
-  validateCustomMeeting(Object.assign({}, okForm, { time: '9', duration: 0 }), [], fallRules, TODAY).length, 2);
+  validateCustomMeeting(Object.assign({}, okForm, { time: '9', duration: 0 }), [], fp28Rules, TODAY).length, 2);
 // Stored at Stockholm-local midnight (23:00Z the day before in CET) — the clash
 // check must compare the LOCAL day, or it would miss this one.
-const existingExtra = { programName: PROGRAM, type: 'Extra planning meeting', date: new Date('2026-11-11T23:00:00.000Z'), time: '10:00' };
+const existingExtra = { programName: FP28, type: 'Extra planning meeting', date: new Date('2026-11-11T23:00:00.000Z'), time: '10:00' };
 check('the same meeting on the same local day is refused',
-  validateCustomMeeting(okForm, [existingExtra], fallRules, TODAY).length, 1);
+  validateCustomMeeting(okForm, [existingExtra], fp28Rules, TODAY).length, 1);
 check('...but another day is fine',
-  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-11-13' }), [existingExtra], fallRules, TODAY).length, 0);
+  validateCustomMeeting(Object.assign({}, okForm, { dateKey: '2026-11-13' }), [existingExtra], fp28Rules, TODAY).length, 0);
 check('customAt marks an extra meeting', isCustomMeeting({ customAt: '2026-10-07T10:00:00Z' }), true);
-check('a rule meeting is not extra', isCustomMeeting(onboardingNew), false);
+check('a rule meeting is not extra', isCustomMeeting(fp28Intro), false);
 check('customAt stays out of the auto-save signature',
-  scheduleSignature(Object.assign({}, onboardingNew, { customAt: 'x' })), scheduleSignature(onboardingNew));
+  scheduleSignature(Object.assign({}, fp28Intro, { customAt: 'x' })), scheduleSignature(fp28Intro));
 
 console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
 console.log(fail === 0 ? 'MEETING IDENTITY OK' : 'MEETING IDENTITY FAILED');
