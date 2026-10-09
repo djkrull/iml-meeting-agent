@@ -3,7 +3,7 @@ import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet
 import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
-import { resolveMeetingDate } from '../utils/meetingRuleEngine';
+import { resolveMeetingDate, ruleAppliesToProgram } from '../utils/meetingRuleEngine';
 import { createIsBlocked } from '../utils/swedishHolidays';
 import {
   localDateKey, dateFromKey, meetingKey,
@@ -775,6 +775,17 @@ const MeetingAgent = () => {
 
       console.log('Filtered programs:', reclassified);
       console.log(`Kept ${reclassified.length} current/future programs (filtered out ${parsedPrograms.length - reclassified.length})`);
+      // The workshop-week flag is set by hand and lives only in the database —
+      // a re-uploaded program list doesn't carry it, so keep it from the programs
+      // already loaded, or regenerating from the upload would move every
+      // workshop-week Reception Lunch back to the Tuesday.
+      const workshopWeek = new Set(programs.filter(p => p.workshopWeekAfterStart)
+        .map(p => `${p.name}|${p.type}|${p.year}`));
+      reclassified.forEach((p, i) => {
+        if (workshopWeek.has(`${p.name}|${p.type}|${p.year}`)) {
+          reclassified[i] = Object.assign({}, p, { workshopWeekAfterStart: true });
+        }
+      });
       setPrograms(reclassified);
       const generated = generateMeetings(reclassified);
       if (generated) setMeetings(generated);
@@ -938,6 +949,10 @@ const MeetingAgent = () => {
       const programMeetings = getMeetingTypes(program);
 
       programMeetings.forEach(meetingType => {
+        // A rule introduced for coming programs only (Reception Lunch) skips the
+        // programs that had already started when it was added.
+        if (!ruleAppliesToProgram(meetingType, program.startDate)) return;
+
         // For Summer Conference and Kleindagarna Introduction and Check-in meetings, only create once
         if ((program.type === 'Summer Conference' || program.type === 'Kleindagarna') &&
             (meetingType.name.includes('Introduction Meeting') || meetingType.name.includes('Check-in Meeting') ||
@@ -1047,7 +1062,7 @@ const MeetingAgent = () => {
             program.startDate,
             program.endDate,
             program.startDate.getFullYear(),
-            { isBlocked }
+            { isBlocked, workshopWeekAfterStart: program.workshopWeekAfterStart === true }
           );
 
           if (meetingDate) {
@@ -1360,6 +1375,54 @@ const MeetingAgent = () => {
         lockedAt: meeting.lockedAt || null, lockedBy: meeting.lockedBy || null,
       }) : m));
     }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Workshop week after start — moves the Reception Lunch from the first seminar
+  // day (Tuesday) to the Monday after start.
+  //
+  // The flag belongs to the PROGRAM (programs.workshop_week_after_start) and is
+  // written through its own endpoint. The meeting is then moved straight away
+  // with the normal date change (move-meeting + review sync) — "Regenerera"
+  // would also do it, but it resets every other manual adjustment.
+  const ruleForMeeting = (meeting) =>
+    (appConfig?.meetingRules?.[meeting.programType] || []).find(r => r.name === meeting.type) || null;
+  const programForMeeting = (meeting) =>
+    programs.find(p => p.name === meeting.programName && p.type === meeting.programType &&
+      (meeting.programYear == null || p.year == null || p.year === meeting.programYear)) || null;
+
+  const toggleWorkshopWeek = async (meeting) => {
+    const rule = ruleForMeeting(meeting);
+    const program = programForMeeting(meeting);
+    if (!rule || !rule.workshopWeekPlacement || !program) return;
+    const value = !program.workshopWeekAfterStart;
+    try {
+      const res = await fetch(`${API_URL}/api/programs/workshop-week`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: program.name, type: program.type, year: program.year, value })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.updated === 0) throw new Error('program not found in the database — reload the page');
+    } catch (err) {
+      console.error('Failed to update workshop week:', err);
+      alert('⚠️ Could not save the workshop week (' + err.message + ').\n\nReload the page and try again.');
+      return;
+    }
+    setPrograms(prev => prev.map(p =>
+      p.name === program.name && p.type === program.type && p.year === program.year
+        ? Object.assign({}, p, { workshopWeekAfterStart: value }) : p));
+
+    const isBlocked = createIsBlocked(appConfig.noMeetingPeriods || appConfig.imlClosedDays || []);
+    const newDate = resolveMeetingDate(rule, program.startDate, program.endDate,
+      program.startDate.getFullYear(), { isBlocked, workshopWeekAfterStart: value });
+    if (!newDate || localDateKey(newDate) === localDateKey(meeting.date)) return;
+    if (isLocked(meeting)) {
+      alert(`The workshop week is saved, but this meeting is locked and stays on its date.\n\nThe rule now gives ${localDateKey(newDate)} — unlock and move it by hand if it should follow.`);
+      return;
+    }
+    await updateMeetingSchedule(meeting, { date: newDate, time: meeting.time });
   };
 
   // ---------------------------------------------------------------------------
@@ -4005,6 +4068,21 @@ const MeetingAgent = () => {
                               {locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                               {locked ? 'Locked' : 'Lock Date'}
                             </button>
+
+                            {ruleForMeeting(meeting)?.workshopWeekPlacement && programForMeeting(meeting) && (
+                              <label
+                                className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition flex items-center justify-center gap-2 cursor-pointer"
+                                title="Workshop the week after program start: the lunch goes on the Monday after start instead of the first seminar day (Tuesday). Saved on the program; the meeting moves at once."
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={programForMeeting(meeting).workshopWeekAfterStart === true}
+                                  onChange={() => toggleWorkshopWeek(meeting)}
+                                  className="w-4 h-4"
+                                />
+                                Workshop week after start
+                              </label>
+                            )}
 
                             {custom && (
                               <button

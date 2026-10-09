@@ -81,6 +81,11 @@ const OLD = {
   // first Tuesday AFTER start, tied to the first seminar.
   // Verified against Fall 2026 (start Wed 2 Sep → Tue 8 Sep).
   'Program Start Meeting': { lead: 1, wd: 2, policy: '2026-08 first Tuesday after start' },
+  // POLICY 2026-10 (admin meeting 9 Oct, 2d): new meeting type — the first
+  // seminar day, by default the first Tuesday AFTER start (same day as the
+  // Program Start Meeting); the first Monday after start when the program has a
+  // workshop the week after start (checked separately, `workshop`).
+  'Reception Lunch': { lead: 1, wd: 2, workshop: { lead: 1, wd: 1 }, policy: '2026-10 Tuesday after start, Monday if workshop week' },
   // POLICY 2026-09: 42 -> 49 days. See the note in defaultSettings.js.
   'Mid-term meeting': { lead: 49, wd: 5, policy: '2026-09 seven weeks after start' },
   // POLICY 2026-09 (Arbetsprocesser): the Friday two weeks before program end.
@@ -124,6 +129,17 @@ function checkProgram(p) {
     if (fmt(oldDate) !== fmt(newDate)) {
       mismatches++;
       console.log(`  MISMATCH ${p.type} ${p.year} / ${rule.name}: old ${fmt(oldDate)} vs new ${fmt(newDate)}`);
+    }
+    // Workshop-week variant: a rule with a workshopWeekPlacement must have an
+    // expectation for it, or the variant would go unchecked.
+    if (rule.workshopWeekPlacement || old.workshop) {
+      checks++;
+      const wOld = old.workshop ? oldCalc(p.start, p.end, old.workshop.lead, old.workshop.wd, p.type) : null;
+      const wNew = resolveMeetingDate(rule, p.start, p.end, p.year, { workshopWeekAfterStart: true });
+      if (!old.workshop || !rule.workshopWeekPlacement || fmt(wOld) !== fmt(wNew)) {
+        mismatches++;
+        console.log(`  MISMATCH ${p.type} ${p.year} / ${rule.name} (workshop week): old ${fmt(wOld)} vs new ${fmt(wNew)}`);
+      }
     }
   });
 }
