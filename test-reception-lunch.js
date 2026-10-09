@@ -51,5 +51,27 @@ eq('start 2026-10-09 included', ruleAppliesToProgram(rule, at(2026, 10, 9)), tru
 eq('Spring 2027 included', ruleAppliesToProgram(rule, at(2027, 1, 12)), true);
 eq('rule without cutoff applies', ruleAppliesToProgram(programStart, at(2020, 1, 1)), true);
 
+console.log('Workshop flags follow the server (another tab may have set one)');
+const { mergeProgramFlags } = require('./src/utils/meetingIdentity');
+const local = [
+  { name: 'S27', type: 'Spring Program', year: 2027, workshopWeekAfterStart: false },
+  { name: 'F27', type: 'Fall Program', year: 2027, workshopWeekAfterStart: true },
+  { name: 'New', type: 'Fall Program', year: 2028 },
+];
+const server = [
+  { name: 'S27', type: 'Spring Program', year: 2027, workshopWeekAfterStart: true },
+  { name: 'F27', type: 'Fall Program', year: 2027, workshopWeekAfterStart: false },
+];
+const merged = mergeProgramFlags(local, server);
+eq('server true wins over stale local false', merged[0].workshopWeekAfterStart, true);
+eq('server false wins over stale local true', merged[1].workshopWeekAfterStart, false);
+eq('program unknown to server keeps local', merged[2].workshopWeekAfterStart, undefined);
+eq('local array not mutated', local[0].workshopWeekAfterStart, false);
+eq('unchanged → same array (no re-render/auto-save)', mergeProgramFlags(merged, server) === merged, true);
+eq('same name, other year not matched', mergeProgramFlags(local, [{ name: 'S27', type: 'Spring Program', year: 2028, workshopWeekAfterStart: true }]) === local, true);
+// The regenerated date follows the merged flag.
+const s27 = Object.assign({}, merged[0], { start: at(2027, 1, 13) });
+eq('regenerate from merged flag → Monday', fmt(resolveMeetingDate(rule, s27.start, null, 2027, { isBlocked, workshopWeekAfterStart: s27.workshopWeekAfterStart })), '2027-01-18');
+
 console.log(failures === 0 ? '\nRECEPTION LUNCH OK' : `\nRECEPTION LUNCH FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);
