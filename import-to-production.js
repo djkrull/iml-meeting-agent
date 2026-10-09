@@ -82,9 +82,13 @@ function parseCSV(text) {
   });
 }
 
-// Meeting type definitions (mirror of frontend MeetingAgent.jsx).
-// Introduction Meeting is versioned by program-year: FP28+ and SP29+ get the
-// new -600d offset (Mar→Jan shift); older programs keep -540d.
+// WARNING — HISTORICAL RULES. These hardcoded definitions predate the 2026-08/09
+// policy changes (check-ins, onboarding, program start, mid-term, introduction
+// and evaluation all moved). The live rules are `app_settings.config.meetingRules`,
+// seeded from server/defaultSettings.js. Do NOT use this script to (re)generate
+// meetings — use "Regenerera" in the app, which reads the live rules.
+//
+// Meeting type definitions (mirror of the OLD frontend MeetingAgent.jsx).
 const introMeetingOld       = { name: 'Introduction Meeting', leadTime: -540, weekday: 5, time: '10:00', participants: ['Program Organizers', 'Directors', 'Admin Coordinator'], duration: 30, description: 'Initial program planning and expectations' };
 const introMeetingFallNew   = { ...introMeetingOld, leadTime: -600 }; // FP28+
 const introMeetingSpringNew = { ...introMeetingOld, leadTime: -600 }; // SP29+

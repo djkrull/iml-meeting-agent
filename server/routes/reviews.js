@@ -271,6 +271,29 @@ router.post('/:id/sync-meeting', async (req, res) => {
   }
 });
 
+// Add ONE meeting to an existing review — used for an extra meeting added after
+// the review was shared. sync-meeting only updates rows the review already has,
+// and re-sharing the whole schedule (PUT) would wipe every director's answers.
+router.post('/:id/add-meeting', async (req, res) => {
+  try {
+    const { id: reviewId } = req.params;
+    const { meeting } = req.body;
+    if (!meeting || !meeting.programName || !meeting.type || !meeting.date || !meeting.time) {
+      return res.status(400).json({ error: 'meeting with programName, type, date and time is required' });
+    }
+    const existing = await dbHelpers.getMeetingByCharacteristics(reviewId, meeting.programName, meeting.type);
+    if (existing) {
+      return res.status(409).json({ error: 'The review already has a meeting of that type for that program' });
+    }
+    const result = await dbHelpers.addMeeting(reviewId, meeting);
+    console.log(`[REVIEW ADD] ${meeting.type} / ${meeting.programName} added to review ${reviewId}`);
+    res.status(201).json({ success: true, id: result.id });
+  } catch (error) {
+    console.error('Error adding meeting to review:', error);
+    res.status(500).json({ error: 'Failed to add meeting to review', details: error.message });
+  }
+});
+
 // Submit approval for a meeting
 router.post('/:id/meetings/:meetingId/approve', async (req, res) => {
   try {

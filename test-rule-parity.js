@@ -2,10 +2,11 @@
 // seeded from server/defaultSettings must produce IDENTICAL meeting dates to the
 // reference logic below, for every non-weekly rule. Run: node test-rule-parity.js
 //
-// The reference logic is the historical hardcoded calculateMeetingDate. Two rules
-// have since diverged from history by an explicit IML policy decision (2026-08,
-// Sofie Upmark) — see the EXPECTED table. Everything else must still match the
-// original hardcoded dates exactly.
+// The reference logic is the historical hardcoded calculateMeetingDate. Several
+// rules have since diverged from history by explicit IML policy decisions
+// (2026-08 Sofie Upmark; 2026-09 the working-process document "Arbetsprocesser")
+// — each is flagged `policy` in the OLD table. Everything else must still match
+// the original hardcoded dates exactly.
 const { Pool } = require('pg');
 const { resolveMeetingDate } = require('./src/utils/meetingRuleEngine');
 const { buildDefaultConfig } = require('./server/defaultSettings');
@@ -39,9 +40,20 @@ function oldCalc(startDate, endDate, leadTime, weekday, programType) {
 
 // Reference for rules whose POLICY has moved them off the day-offset form.
 // Kept separate from oldCalc so the historical replica above stays verbatim.
-function policyCalc(startDate, { leadMonths, wd, snap }) {
-  const t = new Date(startDate.getTime());
-  t.setMonth(t.getMonth() + leadMonths);
+// Start-anchored month offsets (leadMonths) or end-anchored week offsets (endWeeks),
+// then a weekday snap: 'onOrBefore' steps back, 'nearest' takes the closer side
+// (ties go back), anything else steps forward.
+function policyCalc(p, { leadMonths, endWeeks, wd, snap }) {
+  const base = endWeeks !== undefined ? p.end : p.start;
+  if (!base) return null;
+  const t = new Date(base.getTime());
+  if (leadMonths !== undefined) t.setMonth(t.getMonth() + leadMonths);
+  if (endWeeks !== undefined) t.setDate(t.getDate() + endWeeks * 7);
+  if (snap === 'nearest') {
+    const back = (t.getDay() - wd + 7) % 7, fwd = (wd - t.getDay() + 7) % 7;
+    t.setDate(t.getDate() + (back <= fwd ? -back : fwd));
+    return t;
+  }
   const step = snap === 'onOrBefore' ? -1 : 1;
   let guard = 0;
   while (t.getDay() !== wd && guard++ < 14) t.setDate(t.getDate() + step);
@@ -51,7 +63,12 @@ function policyCalc(startDate, { leadMonths, wd, snap }) {
 // Expected leadTime/weekday by rule name. Unless flagged `policy`, these are the
 // historical hardcoded values and must never drift.
 const OLD = {
-  'Introduction Meeting': { lead: -540, wd: 5, introGate: true },
+  // POLICY 2026-09 (Arbetsprocesser, "1,5 years before program"): spring ≈ Sep 15,
+  // fall ≈ Mar 1. Replaces 540 days with a 600-day override from FP28/SP29.
+  'Introduction Meeting': { byType: {
+    'Spring Program': { leadMonths: -17, wd: 5, snap: 'forward' },
+    'Fall Program':   { leadMonths: -18, wd: 5, snap: 'nearest' },
+  }, policy: '2026-09 1,5 years before start' },
   // POLICY 2026-09: moved from 180 days before start to 3 months before,
   // snapped on or before Friday. The 180-day form matched neither the working-
   // process document nor the dates communicated to organizers.
@@ -71,7 +88,8 @@ const OLD = {
   'Reception Lunch': { lead: 1, wd: 2, workshop: { lead: 1, wd: 1 }, policy: '2026-10 Tuesday after start, Monday if workshop week' },
   // POLICY 2026-09: 42 -> 49 days. See the note in defaultSettings.js.
   'Mid-term meeting': { lead: 49, wd: 5, policy: '2026-09 seven weeks after start' },
-  'Evaluation meeting/lunch': { lead: 'end', wd: 5 },
+  // POLICY 2026-09 (Arbetsprocesser): the Friday two weeks before program end.
+  'Evaluation meeting/lunch': { endWeeks: -2, wd: 5, snap: 'onOrBefore', policy: '2026-09 Friday two weeks before end' },
   'Meeting with organizer and B&P': { lead: -120, wd: 5 },
   'Check-in meeting with Organizer': { lead: -45, wd: 5 },
   'Introduction Meeting - Group 1': { lead: -240, wd: 5 },
@@ -82,12 +100,6 @@ const OLD = {
   'Weekly Welcome Meeting': { weekly: true, wd: 1 },
 };
 
-function oldIntroLead(type, year) {
-  if (type === 'Fall Program' && year >= 2028) return -600;
-  if (type === 'Spring Program' && year >= 2029) return -600;
-  return -540;
-}
-
 const fmt = d => d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : 'null';
 
 const config = buildDefaultConfig();
@@ -96,8 +108,10 @@ let checks = 0, mismatches = 0;
 function checkProgram(p) {
   const rules = config.meetingRules[p.type] || [];
   rules.forEach(rule => {
-    const old = OLD[rule.name];
-    if (!old) { console.log(`  ?? no OLD mapping for "${rule.name}"`); return; }
+    const entry = OLD[rule.name];
+    if (!entry) { console.log(`  ?? no OLD mapping for "${rule.name}"`); return; }
+    const old = entry.byType ? entry.byType[p.type] : entry;
+    if (!old) { console.log(`  ?? no OLD mapping for "${rule.name}" in ${p.type}`); return; }
     if (old.weekly) {
       // weekly: only the weekday matters (recurring loop is unchanged)
       checks++;
@@ -107,10 +121,9 @@ function checkProgram(p) {
       }
       return;
     }
-    const lead = old.introGate ? oldIntroLead(p.type, p.year) : old.lead;
-    const oldDate = old.leadMonths !== undefined
-      ? policyCalc(p.start, old)
-      : oldCalc(p.start, p.end, lead, old.wd, p.type);
+    const oldDate = (old.leadMonths !== undefined || old.endWeeks !== undefined)
+      ? policyCalc(p, old)
+      : oldCalc(p.start, p.end, old.lead, old.wd, p.type);
     const newDate = resolveMeetingDate(rule, p.start, p.end, p.year);
     checks++;
     if (fmt(oldDate) !== fmt(newDate)) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings, Send, AlertTriangle, Lock, Unlock } from 'lucide-react';
+import { Calendar, Clock, Users, Download, CheckCircle, XCircle, FileSpreadsheet, Upload, CalendarDays, CalendarCheck, Edit2, Share2, Copy, Save, X, RefreshCw, Trash2, ChevronDown, Settings, Send, AlertTriangle, Lock, Unlock, Plus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { IdentityPicker, IdentityChip, readStoredIdentityId, storeIdentityId, clearStoredIdentity } from './IdentityGate';
 import SettingsPanel from './Settings';
@@ -9,7 +9,8 @@ import {
   localDateKey, dateFromKey, meetingKey,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus, isLocked,
-  mergeProgramFlags,
+  isCustomMeeting, validateCustomMeeting,
+  matchReviewRow, sameReviewStale, mergeProgramFlags,
 } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
@@ -17,43 +18,41 @@ const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 // ---------------------------------------------------------------------------
-// ONE-OFF 2027 EXCEPTION — SC27 Special Introduction/Check-in meetings.
+// ONE-OFF 2027 EXCEPTION — SC27 special conferences left out of the shared meetings.
 //
-// Three of the ten 2027 Summer Conferences run back-to-back with "Minneshögtid
-// GML 100 år" (Gösta Mittag-Leffler's 100-year jubilee). That jubilee is NOT a
-// row in this app's `programs` table — memorial events are excluded by design
-// (see CLAUDE.md "Memorial events"). Its organizers, plus the jubilee's own
-// contact, need an extra Introduction/Check-in meeting 14 days before the
-// ordinary shared Summer Conference one (before(240)/before(90) + Friday
-// snap), as ONE meeting each — no Group 1/Group 2 split.
+// Four 2027 events are "special": 24-28 May (Universality), 31 May - 4 Jun
+// (Minneshögtid), 7-11 Jun (Geometric flows) and 28 Jun - 2 Jul (Homotopy,
+// geometry, and arithmetic; added 2026-10-02) — user decision 2026-09-29,
+// replacing the 2026-09-17 "first three conferences" split that had AI for
+// Mathematics (14-18 Jun) in it. AI for Mathematics is an ordinary conference
+// and is invited to the ordinary shared meetings on purpose.
+//
+// The special group is left out of the ordinary shared Introduction/Check-in
+// meetings and gets NO Introduction or Check-in meeting of its own (decided
+// 2026-10-02 with Hans Ringström and Sofie Upmark): they are experienced
+// organizers and are told by e-mail instead, with only the participant-list
+// (15 Oct) and schedule (1 Apr) deadlines. The earlier SC27 Special
+// Introduction/Check-in rules were removed.
+//
+// Minneshögtid never reaches programList (memorial events are filtered out on
+// import), so only three of the four ranges match a program; its organizer is
+// already among Geometric flows' organizers.
+//
+// The ordinary shared meetings still take their DATE from the year's earliest
+// conference, which is a special one — kept on purpose (2026-09-17) so the
+// already-planned 2 Oct / 26 Feb dates do not move. Only their organizer list
+// excludes the special group.
 //
 // Deliberately NOT a meetingRules['Summer Conference'] entry: every rule there
 // applies to ALL Summer Conference programs of every year, and this is a
-// single-year, three-program exception — see CLAUDE.md's "config not
+// single-year, three-event exception — see CLAUDE.md's "config not
 // hardcode" rule, which this block is a narrow, deliberate exception to.
 // REMOVE after the 2027 Summer Conference season.
 const SC27_SPECIAL_DATE_RANGES_2027 = [
   { from: '2027-05-23', to: '2027-05-27', nameHint: 'universality' },
+  { from: '2027-05-30', to: '2027-06-03', nameHint: 'minneshögtid', inProgramList: false },
   { from: '2027-06-06', to: '2027-06-10', nameHint: 'geometric flows' },
-  { from: '2027-06-13', to: '2027-06-17', nameHint: 'ai for mathematics' },
-];
-const SC27_SPECIAL_RULES = [
-  {
-    name: 'SC27 Special Introduction Meeting',
-    offset: { amount: 254, unit: 'days', direction: 'before' }, // ordinary 240 + 14
-    placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
-    time: '11:00', duration: 30,
-    participants: ['SC27 Conference Organizers', 'GML100 Jubilee Contact', 'Admin Team', 'Directors'],
-    description: 'Initial planning — the three SC27 conferences held alongside the GML 100-year jubilee',
-  },
-  {
-    name: 'SC27 Special Check-in Meeting',
-    offset: { amount: 104, unit: 'days', direction: 'before' }, // ordinary 90 + 14
-    placement: { mode: 'weekday', weekday: 5, snap: 'forward' },
-    time: '11:00', duration: 30,
-    participants: ['SC27 Conference Organizers', 'GML100 Jubilee Contact', 'Admin Team'],
-    description: 'Pre-conference preparations review — the three SC27 conferences held alongside the GML 100-year jubilee',
-  },
+  { from: '2027-06-27', to: '2027-07-01', nameHint: 'homotopy' },
 ];
 
 // Inline date/time editor for one meeting in the timeline.
@@ -216,6 +215,9 @@ const MeetingAgent = () => {
   // Second gate on Regenerate: the diff alone is easy to click past, and the
   // operation rewrites every future date. Applying stays disabled until this is ticked.
   const [regenConfirmed, setRegenConfirmed] = useState(false);
+  // "Lägg till möte": a one-off meeting no rule produces. null = dialog closed.
+  const [customForm, setCustomForm] = useState(null);
+  const [customSaving, setCustomSaving] = useState(false);
 
   // Load the admin roster from settings, then resolve any remembered identity.
   const loadAdminRoster = React.useCallback(async () => {
@@ -395,14 +397,21 @@ const MeetingAgent = () => {
             // old row still existed) the new date inherited the OLD date's
             // approvals — showing "2/2 directors" for answers nobody gave.
             // Approvals belong to a specific date; if the review row hasn't been
-            // synced yet the card correctly shows none until it is.
-            const dbMeeting = review.meetings.find(m =>
-              m.program_name === meeting.programName &&
-              m.type === meeting.type &&
-              localDateKey(m.date) === localDateKey(meeting.date)
-            );
+            // synced yet the card correctly shows none until it is — and says so
+            // via `reviewStale`, instead of just hiding the attendance control.
+            const { row: dbMeeting, stale } = matchReviewRow(review.meetings, meeting);
 
-            if (!dbMeeting) return meeting;
+            if (!dbMeeting) {
+              if (!stale || (sameReviewStale(meeting.reviewStale || null, stale) && !meeting.reviewMeetingId)) {
+                return meeting;
+              }
+              // The review still holds this meeting on another date. Drop what an
+              // earlier match left behind, or attendance would keep being written
+              // to the old date's row and its answers shown on the new one.
+              changed = true;
+              return { ...meeting, reviewStale: stale, reviewMeetingId: null,
+                approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 };
+            }
 
             // Only director responses gate approval; admin responses are attendance.
             const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -430,13 +439,14 @@ const MeetingAgent = () => {
               meeting.approved === approved &&
               (meeting.approvals?.length || 0) === approvals.length &&
               (meeting.adminApprovals?.length || 0) === adminApprovals.length &&
-              meeting.reviewMeetingId === dbMeeting.id
+              meeting.reviewMeetingId === dbMeeting.id &&
+              !meeting.reviewStale
             ) {
               return meeting;
             }
 
             changed = true;
-            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved, reviewMeetingId: dbMeeting.id };
+            return { ...meeting, approvedCount, rejectedCount, approvals, adminApprovals, approved, reviewMeetingId: dbMeeting.id, reviewStale: null };
           });
 
           // Nothing changed → return the SAME array so no re-render / no auto-save.
@@ -918,14 +928,16 @@ const MeetingAgent = () => {
       return Array.isArray(rules) ? rules : [];
     };
 
-    // One-off SC27 (2027) special meetings — see constants above generateMeetings.
+    // One-off SC27 (2027) special conferences, excluded from the shared summer
+    // meetings below — see the constant at the top of this file.
     const sc27SpecialPrograms = programList.filter(p => {
       if (p.type !== 'Summer Conference' || !p.startDate) return false;
       const ymd = localDateKey(p.startDate); // Stockholm-local day, not UTC
       return SC27_SPECIAL_DATE_RANGES_2027.some(r => ymd >= r.from && ymd <= r.to);
     });
-    if (sc27SpecialPrograms.length > 0 && sc27SpecialPrograms.length !== SC27_SPECIAL_DATE_RANGES_2027.length) {
-      console.warn(`SC27 special meetings: expected ${SC27_SPECIAL_DATE_RANGES_2027.length} matching programs, found ${sc27SpecialPrograms.length}. Check SC27_SPECIAL_DATE_RANGES_2027 against the live programs table.`);
+    const sc27ExpectedPrograms = SC27_SPECIAL_DATE_RANGES_2027.filter(r => r.inProgramList !== false).length;
+    if (sc27SpecialPrograms.length > 0 && sc27SpecialPrograms.length !== sc27ExpectedPrograms) {
+      console.warn(`SC27 special meetings: expected ${sc27ExpectedPrograms} matching programs, found ${sc27SpecialPrograms.length}. Check SC27_SPECIAL_DATE_RANGES_2027 against the live programs table.`);
     }
     sc27SpecialPrograms.forEach(p => {
       const ymd = localDateKey(p.startDate);
@@ -934,37 +946,6 @@ const MeetingAgent = () => {
         console.warn(`SC27 special meetings: program "${p.name}" matched by date but not by expected name hint "${hint}" — verify this is really the right program.`);
       }
     });
-    if (sc27SpecialPrograms.length > 0) {
-      const earliest = sc27SpecialPrograms.reduce((a, b) => (a.startDate <= b.startDate ? a : b));
-      const organizers = sc27SpecialPrograms
-        .map(p => p.organizer)
-        .filter((org, idx, self) => self.indexOf(org) === idx)
-        .join(' / ');
-      SC27_SPECIAL_RULES.forEach(rule => {
-        const meetingDate = resolveMeetingDate(
-          { anchor: 'start', offset: rule.offset, placement: rule.placement },
-          earliest.startDate, earliest.endDate, 2027, { isBlocked }
-        );
-        if (!meetingDate) return;
-        const inheritedTime = getInheritedTime('Summer Conference', rule.name, 2027, rule.time);
-        generatedMeetings.push({
-          id: meetingId++,
-          programId: 'sc27-special-2027',
-          programName: 'SC27 Special Conferences',
-          programType: 'Summer Conference',
-          programYear: 2027,
-          programOrganizer: organizers,
-          type: rule.name,
-          date: meetingDate,
-          time: inheritedTime,
-          duration: rule.duration,
-          participants: rule.participants,
-          description: rule.description,
-          status: 'pending',
-          approved: false,
-        });
-      });
-    }
 
     programList.forEach(program => {
       const programMeetings = getMeetingTypes(program);
@@ -1001,11 +982,15 @@ const MeetingAgent = () => {
 
               let organizers = program.organizer;
 
-              // For Summer Conferences, collect all organizers from the same year
+              // For Summer Conferences, collect all organizers from the same year —
+              // except the special 2027 group, which has its own
+              // meetings (see SC27_SPECIAL_DATE_RANGES_2027). The DATE above is still taken
+              // from the triggering program, so it does not move.
               if (program.type === 'Summer Conference') {
                 const currentYear = program.startDate.getFullYear();
                 const allOrganizersList = programList
-                  .filter(p => p.type === 'Summer Conference' && p.startDate.getFullYear() === currentYear)
+                  .filter(p => p.type === 'Summer Conference' && p.startDate.getFullYear() === currentYear &&
+                    !sc27SpecialPrograms.includes(p))
                   .map(p => p.organizer)
                   .filter((org, idx, self) => self.indexOf(org) === idx); // Unique
                 organizers = allOrganizersList.join(' / ');
@@ -1178,7 +1163,11 @@ const MeetingAgent = () => {
     const pastMeetings = meetings.filter(m => !isFuture(m));
     const lockedFuture = meetings.filter(m => isFuture(m) && isLocked(m));
     const lockedKeys = new Set(lockedFuture.map(m => `${m.programName}|${m.type}`));
-    const curFut = meetings.filter(m => isFuture(m) && !isLocked(m));
+    // Extra meetings (added by hand) have no rule to be regenerated from, and the
+    // backend's DELETE skips them — keep them out of the diff too, or the preview
+    // would list them as "Tas bort".
+    const customFuture = meetings.filter(m => isFuture(m) && !isLocked(m) && isCustomMeeting(m));
+    const curFut = meetings.filter(m => isFuture(m) && !isLocked(m) && !isCustomMeeting(m));
     const curNW = curFut.filter(m => !isWeekly(m));
     const newNW = regenerated.filter(m => !isWeekly(m) && !lockedKeys.has(`${m.programName}|${m.type}`));
     const curMap = new Map(curNW.map(m => [keyOf(m), m]));
@@ -1210,7 +1199,7 @@ const MeetingAgent = () => {
     }
 
     setRegenPreview({
-      finalMeetings: [...pastMeetings, ...lockedFuture,
+      finalMeetings: [...pastMeetings, ...lockedFuture, ...customFuture,
         ...regenerated.filter(m => !lockedKeys.has(`${m.programName}|${m.type}`))],
       futureMeetings: regenerated.filter(m => !lockedKeys.has(`${m.programName}|${m.type}`)),
       changes, weeklyOld, weeklyNew,
@@ -1218,6 +1207,7 @@ const MeetingAgent = () => {
       newCount: regenerated.filter(m => !lockedKeys.has(`${m.programName}|${m.type}`)).length,
       pastCount: pastMeetings.length,
       lockedMeetings: lockedFuture,
+      customMeetings: customFuture,
     });
     setRegenConfirmed(false);
   };
@@ -1470,6 +1460,142 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
     await updateMeetingSchedule(meeting, { date: newDate, time: meeting.time });
   };
 
+  // ---------------------------------------------------------------------------
+  // Extra meetings ("Lägg till möte") — one-offs that no rule produces.
+  //
+  // Written through their own endpoint, never the meetings auto-save: the row is
+  // marked custom server-side, and that marker is what keeps it through
+  // "Regenerera". A row that arrived via the auto-save would carry no marker and
+  // be deleted by the next regeneration.
+  const OTHER_PROGRAM = '__other__';
+
+  // Programs worth offering: those not long over. Sorted by start date.
+  const customProgramOptions = () => {
+    const cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 90);
+    return programs
+      .filter(p => (p.endDate || p.startDate) >= cutoff)
+      .slice()
+      .sort((a, b) => a.startDate - b.startDate);
+  };
+
+  // The program a form refers to: a real program, or a free-text one ("Annat").
+  const customFormProgram = (form) => {
+    if (!form) return null;
+    if (form.programKey === OTHER_PROGRAM) {
+      const name = (form.otherName || '').trim();
+      return name ? { name, type: form.otherType || 'Other', year: Number((form.dateKey || '').slice(0, 4)) || null } : null;
+    }
+    const p = programs.find(x => `${x.name}|${x.type}|${x.year}` === form.programKey);
+    return p ? { id: p.id, name: p.name, type: p.type, organizer: p.organizer, year: p.startDate.getFullYear() } : null;
+  };
+
+  const openCustomMeetingForm = () => {
+    const first = customProgramOptions()[0];
+    setCustomForm({
+      programKey: first ? `${first.name}|${first.type}|${first.year}` : OTHER_PROGRAM,
+      otherName: '', otherType: 'Other',
+      type: '', dateKey: '', time: '10:00', duration: 60,
+      participants: 'Directors, Admin Team', description: '',
+      addToReview: !!currentReviewId,
+    });
+  };
+
+  const customFormErrors = (form) => {
+    const prog = customFormProgram(form);
+    const ruleNames = prog ? ((appConfig?.meetingRules || {})[prog.type] || []).map(r => r.name) : [];
+    return validateCustomMeeting(
+      Object.assign({}, form, { programName: prog ? prog.name : '' }),
+      meetings, ruleNames);
+  };
+
+  const saveCustomMeeting = async () => {
+    const form = customForm;
+    if (!form || customFormErrors(form).length > 0) return;
+    const prog = customFormProgram(form);
+    const date = dateFromKey(form.dateKey); // local midnight, like the rule engine's rows
+    const payload = {
+      programId: prog.id || null,
+      programName: prog.name,
+      programType: prog.type,
+      programYear: prog.year,
+      programOrganizer: prog.organizer || null,
+      type: form.type.trim(),
+      date: date.toISOString(),
+      time: form.time,
+      duration: Number(form.duration),
+      participants: form.participants.split(',').map(s => s.trim()).filter(Boolean),
+      description: form.description.trim(),
+    };
+
+    setCustomSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/programs/custom-meeting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meeting: payload, byId: adminIdentity?.id || null })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409) throw new Error('det finns redan ett sådant möte för programmet den dagen');
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      const meeting = Object.assign({}, payload, {
+        id: data.id, date, status: 'pending', approved: false,
+        customAt: data.customAt, customBy: data.customBy,
+      });
+      // The server holds exactly this row now — don't let the auto-save echo it.
+      serverScheduleRef.current.set(meetingKey(meeting), scheduleSignature(meeting));
+      setMeetings(prev => [...prev, meeting]);
+
+      // A shared review only learns about it if we add it explicitly: sync-meeting
+      // updates existing rows, and re-sharing would wipe every director's answers.
+      let reviewNote = '';
+      if (form.addToReview && currentReviewId) {
+        try {
+          const r = await fetch(`${API_URL}/api/reviews/${currentReviewId}/add-meeting`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting: Object.assign({}, meeting, { date: date.toISOString() }) })
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        } catch (e) {
+          console.error('Failed to add extra meeting to review:', e);
+          reviewNote = '\n\nMötet sparades, men kunde inte läggas till i direktörernas granskning (' + e.message + ').';
+        }
+      }
+      setCustomForm(null);
+      if (reviewNote) alert('⚠️' + reviewNote);
+    } catch (err) {
+      console.error('Failed to add extra meeting:', err);
+      alert('⚠️ Kunde inte lägga till mötet: ' + err.message);
+    } finally {
+      setCustomSaving(false);
+    }
+  };
+
+  const deleteCustomMeeting = async (meeting) => {
+    if (!isCustomMeeting(meeting)) return;
+    if (!window.confirm(`Ta bort extramötet "${meeting.type}" (${localDateKey(meeting.date)} ${meeting.time})?\n\nGår inte att ångra.`)) return;
+    const key = meetingKey(meeting);
+    try {
+      const res = await fetch(`${API_URL}/api/programs/custom-meeting/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          programName: meeting.programName, type: meeting.type,
+          date: (meeting.date instanceof Date ? meeting.date : new Date(meeting.date)).toISOString()
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.deleted === 0) throw new Error('mötet hittades inte i databasen — ladda om sidan');
+      serverScheduleRef.current.delete(key);
+      setMeetings(prev => prev.filter(m => meetingKey(m) !== key));
+    } catch (err) {
+      console.error('Failed to delete extra meeting:', err);
+      alert('⚠️ Kunde inte ta bort mötet: ' + err.message);
+    }
+  };
+
   // Toggle already scheduled status
   const toggleAlreadyScheduled = (meeting) => {
     const key = meetingKey(meeting);
@@ -1699,11 +1825,7 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
           // Match on program + type + DATE — see the same fix in the 30s refresh
           // above. program+type alone let a moved meeting inherit the approvals
           // of the stale row it replaced.
-          const dbMeeting = reviewData.meetings.find(m =>
-            m.program_name === meeting.programName &&
-            m.type === meeting.type &&
-            localDateKey(m.date) === localDateKey(meeting.date)
-          );
+          const { row: dbMeeting, stale } = matchReviewRow(reviewData.meetings, meeting);
 
           if (dbMeeting) {
             const approvedCount = dbMeeting.approvals?.filter(a =>
@@ -1725,10 +1847,14 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
               approvals: allApprovals.filter(a => a.role !== 'admin'),
               adminApprovals: allApprovals.filter(a => a.role === 'admin'),
               approved: approvedCount > 0 && rejectedCount === 0,
-              reviewMeetingId: dbMeeting.id
+              reviewMeetingId: dbMeeting.id,
+              reviewStale: null
             };
           }
-          return meeting;
+          return stale
+            ? { ...meeting, reviewStale: stale, reviewMeetingId: null,
+                approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 }
+            : meeting;
         });
       });
 
@@ -2143,6 +2269,56 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
     } catch (error) {
       console.error('Error syncing meeting:', error);
       alert('Failed to sync meeting. Make sure the server is running.');
+    }
+  };
+
+  // Bring a review row that is still on an OLD date (meeting.reviewStale) onto the
+  // meeting's current date and time. syncSingleMeeting can't do this: it decides
+  // what to clear from meeting.approvals, which is empty precisely because the
+  // dates don't match — so it would carry the old date's answers onto the new
+  // one. The answers to clear come from the stale row itself.
+  const syncStaleReviewMeeting = async (meeting) => {
+    const stale = meeting.reviewStale;
+    if (!currentReviewId || !stale) return;
+
+    const answers = stale.approvals.length
+      ? stale.approvals.map(a => `  • ${a.director_name}${a.role === 'admin' ? ' (admin)' : ''}: ${a.status}`).join('\n')
+      : '  (no responses)';
+    if (!window.confirm(
+      `The director review still has "${meeting.type}" on ${stale.date} at ${stale.time}.\n\n` +
+      `It will be moved to ${localDateKey(meeting.date)} at ${meeting.time}, and the responses given for the old date are cleared:\n\n${answers}\n\nContinue?`
+    )) return;
+
+    try {
+      const post = (path, body) => fetch(`${API_URL}/api/reviews/${currentReviewId}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(async res => {
+        if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+        return res.json();
+      });
+
+      if (stale.approvals.length) {
+        await post('clear-meeting-approvals', { programName: meeting.programName, meetingType: meeting.type });
+      }
+      const synced = await post('sync-meeting', {
+        programName: meeting.programName,
+        meetingType: meeting.type,
+        date: meeting.date.toISOString(),
+        time: meeting.time
+      });
+      if (!synced.changes) throw new Error('the meeting was not found in the review');
+
+      // The review row keeps its id, so attendance can be recorded right away.
+      const key = meetingKey(meeting);
+      setMeetings(prev => prev.map(m => meetingKey(m) === key
+        ? { ...m, reviewStale: null, reviewMeetingId: stale.id,
+            approvals: [], adminApprovals: [], approvedCount: 0, rejectedCount: 0 }
+        : m));
+    } catch (error) {
+      console.error('Error syncing stale review meeting:', error);
+      alert('Could not sync the meeting to the director review (' + error.message + ').');
     }
   };
 
@@ -2789,6 +2965,14 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
                 Regenerera
               </button>
               <button
+                onClick={openCustomMeetingForm}
+                title="Lägg till ett enstaka möte som inte kommer från någon regel. Det behålls när du trycker Regenerera."
+                className="flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-4 py-2 rounded-lg font-medium transition"
+              >
+                <Plus className="w-5 h-5" />
+                Lägg till möte
+              </button>
+              <button
                 onClick={() => setShowSettings(true)}
                 title="Inställningar"
                 className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition"
@@ -2803,6 +2987,112 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
           {showSettings && (
             <SettingsPanel onClose={() => { setShowSettings(false); loadAdminRoster(); }} />
           )}
+
+          {customForm && (() => {
+            const errors = customFormErrors(customForm);
+            const setF = (field, value) => setCustomForm(f => Object.assign({}, f, { [field]: value }));
+            const options = customProgramOptions();
+            const input = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none';
+            return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
+                <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-gray-800">Lägg till möte</h2>
+                  <button onClick={() => setCustomForm(null)} className="text-gray-500 hover:text-gray-800" title="Stäng">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-4 text-sm">
+                  <p className="text-gray-600">
+                    Ett enstaka möte som inte kommer från någon mötesregel. Det märks <em>Extra</em>,
+                    behålls när någon trycker Regenerera och kan flyttas, låsas och tas bort som vanligt.
+                  </p>
+                  <label className="block">
+                    <span className="font-medium text-gray-700">Program</span>
+                    <select className={input} value={customForm.programKey} onChange={e => setF('programKey', e.target.value)}>
+                      {options.map(p => (
+                        <option key={`${p.name}|${p.type}|${p.year}`} value={`${p.name}|${p.type}|${p.year}`}>
+                          {p.name} ({p.type} {p.startDate.getFullYear()})
+                        </option>
+                      ))}
+                      <option value={OTHER_PROGRAM}>Annat (skriv namn)…</option>
+                    </select>
+                  </label>
+                  {customForm.programKey === OTHER_PROGRAM && (
+                    <div className="grid grid-cols-3 gap-3">
+                      <label className="block col-span-2">
+                        <span className="font-medium text-gray-700">Namn</span>
+                        <input className={input} value={customForm.otherName} onChange={e => setF('otherName', e.target.value)} placeholder="t.ex. IML Administration" />
+                      </label>
+                      <label className="block">
+                        <span className="font-medium text-gray-700">Typ</span>
+                        <select className={input} value={customForm.otherType} onChange={e => setF('otherType', e.target.value)}>
+                          {['Other', 'Spring Program', 'Fall Program', 'Summer Conference', 'Kleindagarna'].map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                  <label className="block">
+                    <span className="font-medium text-gray-700">Mötets namn</span>
+                    <input className={input} value={customForm.type} onChange={e => setF('type', e.target.value)} placeholder="t.ex. Extra meeting with organizers" />
+                  </label>
+                  <div className="grid grid-cols-3 gap-3">
+                    <label className="block">
+                      <span className="font-medium text-gray-700">Datum</span>
+                      <input type="date" className={input} value={customForm.dateKey} onChange={e => setF('dateKey', e.target.value)} />
+                    </label>
+                    <label className="block">
+                      <span className="font-medium text-gray-700">Tid</span>
+                      <input type="time" className={input} value={customForm.time} onChange={e => setF('time', e.target.value)} />
+                    </label>
+                    <label className="block">
+                      <span className="font-medium text-gray-700">Minuter</span>
+                      <input type="number" min="5" step="5" className={input} value={customForm.duration} onChange={e => setF('duration', e.target.value)} />
+                    </label>
+                  </div>
+                  <label className="block">
+                    <span className="font-medium text-gray-700">Deltagare</span>
+                    <input className={input} value={customForm.participants} onChange={e => setF('participants', e.target.value)} placeholder="Kommaseparerat" />
+                  </label>
+                  <label className="block">
+                    <span className="font-medium text-gray-700">Beskrivning</span>
+                    <textarea rows={3} className={input} value={customForm.description} onChange={e => setF('description', e.target.value)} />
+                  </label>
+                  <label className={`flex items-start gap-3 ${currentReviewId ? 'text-gray-800 cursor-pointer' : 'text-gray-400'}`}>
+                    <input
+                      type="checkbox"
+                      disabled={!currentReviewId}
+                      checked={!!currentReviewId && customForm.addToReview}
+                      onChange={e => setF('addToReview', e.target.checked)}
+                      className="mt-0.5 w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 flex-shrink-0"
+                    />
+                    <span>
+                      Visa för direktörerna i den aktiva granskningen
+                      {!currentReviewId && ' (ingen granskning är delad ännu)'}
+                    </span>
+                  </label>
+                  {errors.length > 0 && (customForm.type || customForm.dateKey) && (
+                    <ul className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 list-disc pl-6 space-y-1">
+                      {errors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  )}
+                </div>
+                <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+                  <button onClick={() => setCustomForm(null)} className="px-4 py-2 rounded-lg font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">
+                    Avbryt
+                  </button>
+                  <button
+                    onClick={saveCustomMeeting}
+                    disabled={errors.length > 0 || customSaving}
+                    className="px-4 py-2 rounded-lg font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
+                  >
+                    {customSaving ? 'Sparar…' : 'Lägg till'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            );
+          })()}
 
           {regenPreview && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2846,6 +3136,22 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
                       </p>
                       <ul className="space-y-1">
                         {regenPreview.lockedMeetings.map((m, i) => (
+                          <li key={i} className="font-mono text-xs">
+                            {localDateKey(m.date)} {m.time} — {m.type} · {m.programName}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {regenPreview.customMeetings && regenPreview.customMeetings.length > 0 && (
+                    <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
+                      <p className="font-semibold mb-2 flex items-center gap-2">
+                        <Plus className="w-4 h-4" />
+                        {regenPreview.customMeetings.length} extramöten behålls som de är
+                      </p>
+                      <ul className="space-y-1">
+                        {regenPreview.customMeetings.map((m, i) => (
                           <li key={i} className="font-mono text-xs">
                             {localDateKey(m.date)} {m.time} — {m.type} · {m.programName}
                           </li>
@@ -3434,6 +3740,7 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
                   const isEditing = editingScheduleKey === key;
                   const invitation = invitationStatus(meeting);
                   const locked = isLocked(meeting);
+                  const custom = isCustomMeeting(meeting);
                   return (
                   <div
                     key={key}
@@ -3474,6 +3781,14 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
                               title="Date locked — kept through Regenerate and refused by the date editor"
                             >
                               <Lock className="w-3 h-3" /> Date locked
+                            </span>
+                          )}
+                          {custom && (
+                            <span
+                              className="text-xs font-semibold px-2 py-1 rounded-full bg-indigo-100 text-indigo-800 inline-flex items-center gap-1"
+                              title="Extra meeting added by hand — not produced by any rule. Regenerate keeps it."
+                            >
+                              <Plus className="w-3 h-3" /> Extra
                             </span>
                           )}
                           {invitation.sent && (
@@ -3670,9 +3985,34 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
                           </div>
                         )}
 
+                        {/* The review still has this meeting on its old date, so there is
+                            no row to attach attendance to. Say so instead of silently
+                            leaving the attendance control out. */}
+                        {currentReviewId && meeting.reviewStale && (
+                          <div className="bg-amber-100 text-amber-900 p-3 rounded-lg mt-2 text-sm">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                              <span>
+                                <strong>The director review still has this meeting on {meeting.reviewStale.date} at {meeting.reviewStale.time}.</strong>{' '}
+                                Directors see the old date, and attendance can't be recorded until the review follows the new one.
+                                {meeting.reviewStale.approvals.length > 0 &&
+                                  ` ${meeting.reviewStale.approvals.length} response(s) were given for the old date and will be cleared.`}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => syncStaleReviewMeeting(meeting)}
+                              className="mt-2 px-3 py-1 rounded-lg bg-amber-200 hover:bg-amber-300 transition text-xs font-semibold flex items-center gap-2"
+                              title="Move the meeting in the director review to this date and time, and clear the responses given for the old date."
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              Sync & Clear Responses
+                            </button>
+                          </div>
+                        )}
+
                         {/* Inline control: the CURRENT admin records their own attendance.
                             Only shown when there's an active per-review row to attach it to. */}
-                        {currentReviewId && meeting.reviewMeetingId && adminIdentity && (() => {
+                        {currentReviewId && meeting.reviewMeetingId && !meeting.reviewStale && adminIdentity && (() => {
                           const mine = meeting.adminApprovals?.find(a => a.attendee_id === adminIdentity.id);
                           const isAttending = mine && (mine.status === 'accepted' || mine.status === 'approved');
                           const isDeclined = mine && (mine.status === 'declined' || mine.status === 'rejected');
@@ -3777,6 +4117,17 @@ Move it to ${localDateKey(newDate)} as the rule now says?`)) {
                                 />
                                 Workshop week after start
                               </label>
+                            )}
+
+                            {custom && (
+                              <button
+                                onClick={() => deleteCustomMeeting(meeting)}
+                                className="px-4 py-2 rounded-lg font-medium transition flex items-center justify-center gap-2 bg-red-50 text-red-700 hover:bg-red-100"
+                                title="Remove this extra meeting. Only meetings added by hand can be removed — rule meetings would come back on Regenerate."
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Remove
+                              </button>
                             )}
 
                             <button

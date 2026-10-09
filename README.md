@@ -53,13 +53,15 @@ Place this file in the public folder or modify the code to allow file upload.
 ## Meeting Types
 
 ### Spring & Fall Programs:
-- Introduction Meeting (18 months before)
-- Check-in meeting with organizers (6 months before)
-- Check-in meeting junior fellows (6 months before, same day)
+- Introduction Meeting (~1.5 years before: spring 17 months, fall 18 months)
+- Check-in meeting with organizers (3 months before)
+- Check-in meeting junior fellows (3 months before, same day)
 - Onboarding meeting (Friday after program start)
 - Program Start Meeting (Tuesday after program start @ 09:00)
-- Mid-term meeting (~6 weeks in)
-- Evaluation meeting (April 20+ for Spring, week before end for Fall)
+- Mid-term meeting (7 weeks after start)
+- Evaluation meeting (Friday two weeks before program end)
+
+Timing follows IML's working-process document (*Arbetsprocesser programverksamhet IML*); the live rules are edited in Settings.
 
 ### Summer Conferences:
 - Introduction Meetings - Group 1 & 2 (8 months before)
