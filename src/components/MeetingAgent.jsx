@@ -10,7 +10,7 @@ import {
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings, invitationStatus, isLocked,
   isCustomMeeting, validateCustomMeeting,
-  matchReviewRow, sameReviewStale,
+  matchReviewRow, sameReviewStale, mergeProgramFlags,
 } from '../utils/meetingIdentity';
 
 const ADMIN_IDENTITY_KEY = 'iml-admin-identity';
@@ -487,6 +487,11 @@ const MeetingAgent = () => {
         const data = await response.json();
         if (!data.meetings) return;
 
+        // Program flags set from another tab (workshop week) — the generator
+        // reads them from this state, so a stale value would regenerate the
+        // Reception Lunch onto the wrong day.
+        if (data.programs) setPrograms(prev => mergeProgramFlags(prev, data.programs));
+
         setMeetings(currentMeetings => {
           let changed = false;
           const next = [];
@@ -776,18 +781,15 @@ const MeetingAgent = () => {
       console.log('Filtered programs:', reclassified);
       console.log(`Kept ${reclassified.length} current/future programs (filtered out ${parsedPrograms.length - reclassified.length})`);
       // The workshop-week flag is set by hand and lives only in the database —
-      // a re-uploaded program list doesn't carry it, so keep it from the programs
-      // already loaded, or regenerating from the upload would move every
-      // workshop-week Reception Lunch back to the Tuesday.
-      const workshopWeek = new Set(programs.filter(p => p.workshopWeekAfterStart)
-        .map(p => `${p.name}|${p.type}|${p.year}`));
-      reclassified.forEach((p, i) => {
-        if (workshopWeek.has(`${p.name}|${p.type}|${p.year}`)) {
-          reclassified[i] = Object.assign({}, p, { workshopWeekAfterStart: true });
-        }
-      });
-      setPrograms(reclassified);
-      const generated = generateMeetings(reclassified);
+      // a re-uploaded program list doesn't carry it. Take it from the server
+      // (another tab may have set it since this one loaded), falling back to the
+      // programs this tab holds, or every workshop-week Reception Lunch would be
+      // generated back onto the Tuesday.
+      const serverPrograms = await fetchServerPrograms();
+      if (!serverPrograms) console.warn('Could not read programs from the server — using the workshop-week flags this tab holds.');
+      const withFlags = mergeProgramFlags(reclassified, serverPrograms || programs);
+      setPrograms(withFlags);
+      const generated = generateMeetings(withFlags);
       if (generated) setMeetings(generated);
     } catch (error) {
       console.error('Error loading file:', error);
@@ -1117,9 +1119,32 @@ const MeetingAgent = () => {
   // a diff for confirmation before applying ("only forward" — nothing is written
   // until the admin confirms). Times are inherited from existing meetings, so a
   // rule change mostly surfaces as date shifts.
-  const regenerateMeetings = () => {
+  // The programs as the server holds them, or null. Used to refresh flags that
+  // another tab may have changed (workshop week) right before generating.
+  const fetchServerPrograms = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/programs`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return Array.isArray(data.programs) ? data.programs : null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const regenerateMeetings = async () => {
     if (!programs || programs.length === 0) { alert('Inga program att regenerera från.'); return; }
-    const regenerated = generateMeetings(programs);
+    // Take the workshop-week flags from the server, not this tab's copy: another
+    // tab may have set one since this tab loaded, and generating from the stale
+    // value would put that Reception Lunch back on the Tuesday.
+    const serverPrograms = await fetchServerPrograms();
+    if (!serverPrograms) {
+      alert('Kunde inte läsa programmen från servern. Ladda om sidan och försök igen.');
+      return;
+    }
+    const freshPrograms = mergeProgramFlags(programs, serverPrograms);
+    if (freshPrograms !== programs) setPrograms(freshPrograms);
+    const regenerated = generateMeetings(freshPrograms);
     if (!regenerated) return; // guard already alerted (config not loaded)
 
     const ymd = (d) => {

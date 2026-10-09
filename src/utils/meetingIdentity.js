@@ -287,7 +287,34 @@ function sameReviewStale(a, b) {
     a.approvals.length === b.approvals.length;
 }
 
+// ---------------------------------------------------------------------------
+// Per-program flags written through their own endpoint (workshopWeekAfterStart).
+//
+// Another tab can set the flag after this tab loaded its programs, and the
+// generator reads it from local state — so before regenerating or importing,
+// and on focus, take the flag from what the server holds. Programs are unique on
+// (name, type, year). Returns the SAME array when nothing changed (no re-render,
+// no auto-save). A program the server doesn't know keeps its local value.
+function programFlagKey(p) {
+  return `${p.name}|${p.type}|${p.year}`;
+}
+
+function mergeProgramFlags(programs, serverPrograms) {
+  const server = new Map((serverPrograms || []).map(p => [programFlagKey(p), p.workshopWeekAfterStart === true]));
+  let changed = false;
+  const next = (programs || []).map(p => {
+    const key = programFlagKey(p);
+    if (!server.has(key)) return p;
+    const flag = server.get(key);
+    if ((p.workshopWeekAfterStart === true) === flag) return p;
+    changed = true;
+    return Object.assign({}, p, { workshopWeekAfterStart: flag });
+  });
+  return changed ? next : programs;
+}
+
 module.exports = {
+  mergeProgramFlags,
   localDateKey, dateFromKey, meetingKey, isSameMeeting,
   isCompleteDateKey, resolveScheduleChange, applyScheduleChange,
   scheduleSignature, snapshotSchedule, changedMeetings,
