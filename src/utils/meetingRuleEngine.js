@@ -8,7 +8,10 @@
 //   { anchor:'start'|'end',
 //     offset:{ amount, unit:'days'|'weeks'|'months', direction:'before'|'after'|'on' },
 //     placement:{ mode:'weekday'|'exact', weekday:0-6|null, snap:'forward'|'backward'|'nearest'|'onOrBefore'|null },
-//     offsetOverrideFromYear?: { fromYear, offset } }
+//     offsetOverrideFromYear?: { fromYear, offset },
+//     workshopWeekPlacement?: placement,   // used instead of `placement` when the
+//                                          // program has a workshop the week after start
+//     appliesFromStartDate?: 'YYYY-MM-DD' } // rule only for programs starting on/after
 
 // Pick the effective offset, applying a year-gated override when present
 // (e.g. Introduction Meeting moves from 540d to 600d before start for FP28+/SP29+).
@@ -59,6 +62,11 @@ function snapToWeekday(date, weekday, snap) {
 // periods behave sensibly: a check-in (snap: onOrBefore) lands BEFORE the summer
 // rather than being pushed to a fortnight before the program starts, while an
 // onboarding (snap: forward) moves past it.
+//
+// opts.workshopWeekAfterStart (the program's own flag) switches a rule that has a
+// `workshopWeekPlacement` over to that placement — the Reception Lunch goes on
+// the Monday instead of the first seminar day when the week after start is a
+// workshop week.
 function resolveMeetingDate(rule, startDate, endDate, programYear, opts = {}) {
   if (!startDate) return null;
   const base = rule.anchor === 'end' ? endDate : startDate;
@@ -66,7 +74,7 @@ function resolveMeetingDate(rule, startDate, endDate, programYear, opts = {}) {
 
   let date = applyOffset(new Date(base.getTime()), effectiveOffset(rule, programYear));
 
-  const place = rule.placement || {};
+  const place = (opts.workshopWeekAfterStart && rule.workshopWeekPlacement) || rule.placement || {};
   if (place.mode === 'weekday' && place.weekday != null) {
     date = snapToWeekday(date, place.weekday, place.snap || 'forward');
 
@@ -94,4 +102,15 @@ function resolveMeetingDate(rule, startDate, endDate, programYear, opts = {}) {
   return date;
 }
 
-module.exports = { resolveMeetingDate, applyOffset, snapToWeekday, effectiveOffset };
+// Does the rule apply to a program at all? A rule introduced for coming programs
+// only (appliesFromStartDate) skips programs that started before that day, so an
+// ongoing program is not handed a meeting it never had. Compared on the LOCAL
+// calendar day, never toISOString (local midnight is the previous day in UTC).
+function ruleAppliesToProgram(rule, startDate) {
+  if (!rule.appliesFromStartDate || !startDate) return true;
+  const d = startDate instanceof Date ? startDate : new Date(startDate);
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return key >= rule.appliesFromStartDate;
+}
+
+module.exports = { resolveMeetingDate, applyOffset, snapToWeekday, effectiveOffset, ruleAppliesToProgram };

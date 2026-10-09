@@ -87,6 +87,23 @@ const commonSpringFall = () => ([
     description: 'Official program kickoff (Welcome to IML). Date may change to fit the first seminar/schedule.',
   },
   {
+    // POLICY 2026-10 (admin meeting 9 Oct, item 2d): a reception lunch for the
+    // program with the Director and Deputy Director. Held on the first seminar
+    // day — by default the Tuesday after start, i.e. the same day as the Program
+    // Start Meeting — or on the Monday after start when the week after start is
+    // a workshop week (the program's `workshopWeekAfterStart` flag, set on the
+    // meeting card). Only for programs starting from 2026-10-09: the programs
+    // already running when it was introduced do not get one.
+    id: 'reception_lunch', name: 'Reception Lunch',
+    anchor: 'start', offset: after(1), placement: weekdayPlacement(2),
+    workshopWeekPlacement: weekdayPlacement(1),
+    appliesFromStartDate: '2026-10-09',
+    time: '12:00', duration: 60,
+    participants: ['Directors'],
+    requiresDirectors: true, recurring: null, sharedPerYear: false, group: null,
+    description: 'Reception lunch with the Director and Deputy Director. Monday after start if the week after start is a workshop week, otherwise the first seminar day (normally Tuesday).',
+  },
+  {
     // POLICY 2026-09: seven weeks after start, not six. The 42-day form was
     // simply wrong about practice — five of the six existing programs already sat
     // at 49 days, and so did the date communicated to Subelliptic's organizers

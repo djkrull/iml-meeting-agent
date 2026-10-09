@@ -106,6 +106,24 @@ router.post('/lock', async (req, res) => {
   }
 });
 
+// Mark a program as having a workshop the week after start. The Reception Lunch
+// then goes on the Monday instead of the first seminar day. Its own endpoint,
+// never the auto-save, like the lock: a shared fact a stale tab must not clobber.
+router.post('/workshop-week', async (req, res) => {
+  try {
+    const { name, type, year, value } = req.body;
+    if (!name || !type || year == null || typeof value !== 'boolean') {
+      return res.status(400).json({ error: 'name, type, year and value (boolean) are required' });
+    }
+    const result = await dbHelpers.setWorkshopWeek({ name, type, year, value });
+    console.log(`[WORKSHOP WEEK] ${type} / ${name} ${year}: ${value} (${result.updated} row(s))`);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error updating workshop week:', error);
+    res.status(500).json({ error: 'Failed to update workshop week', details: error.message });
+  }
+});
+
 // Mark / unmark that the official Outlook invitation has been sent.
 // Its own endpoint, never the meetings auto-save: this is a shared fact and a
 // stale tab must not be able to overwrite it.

@@ -258,6 +258,21 @@ async function initializePostgresDatabase() {
       console.log('Migration note (lock):', migrationError.message);
     }
 
+    // Migration: a program can have a workshop the week after it starts. The
+    // Reception Lunch then moves from the first seminar day (Tuesday) to the
+    // Monday. Nothing in the program list or the CSV import carries this, so it
+    // is set by hand on the meeting card — through its own endpoint, never the
+    // auto-save (savePrograms does not touch existing program rows anyway).
+    try {
+      await pool.query(`
+        ALTER TABLE programs
+        ADD COLUMN IF NOT EXISTS workshop_week_after_start BOOLEAN NOT NULL DEFAULT false
+      `);
+      console.log('workshop-week migration completed');
+    } catch (migrationError) {
+      console.log('Migration note (workshop week):', migrationError.message);
+    }
+
     // Migration: Ensure unique CONSTRAINTS exist (not just indexes).
     // ON CONFLICT ON CONSTRAINT requires an actual named CONSTRAINT, not a plain
     // UNIQUE INDEX — this caused silent INSERT failures in production previously.
@@ -389,6 +404,8 @@ function initializeSQLiteDatabase() {
     ['invitation_sent_at', 'invitation_sent_by', 'invitation_sent_for_date', 'invitation_sent_for_time',
      'locked_at', 'locked_by']
       .forEach(col => db.run(`ALTER TABLE program_meetings ADD COLUMN ${col} TEXT`, () => {}));
+
+    db.run(`ALTER TABLE programs ADD COLUMN workshop_week_after_start INTEGER NOT NULL DEFAULT 0`, () => {});
 
     // Same uniqueness as production, so local dev can upsert instead of
     // wipe-and-reinsert. Deduplicate first or the index can't be created.
@@ -723,6 +740,36 @@ const dbHelpers = {
             if (err) return reject(err);
             resolve({ updated: this.changes, lockedAt, lockedBy });
           });
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  },
+
+  // Mark whether a program has a workshop the week after start (moves the
+  // Reception Lunch to the Monday). Programs are unique on (name, type, year).
+  setWorkshopWeek: ({ name, type, year, value }) => {
+    return new Promise(async (resolve, reject) => {
+      const now = new Date().toISOString();
+      try {
+        if (USE_POSTGRES) {
+          const res = await pool.query(
+            `UPDATE programs SET workshop_week_after_start = $4, updated_at = $5
+              WHERE name = $1 AND type = $2 AND year = $3`,
+            [name, type, year, value, now]
+          );
+          resolve({ updated: res.rowCount });
+        } else {
+          db.run(
+            `UPDATE programs SET workshop_week_after_start = ?, updated_at = ?
+              WHERE name = ? AND type = ? AND year = ?`,
+            [value ? 1 : 0, now, name, type, year],
+            function (err) {
+              if (err) return reject(err);
+              resolve({ updated: this.changes });
+            }
+          );
         }
       } catch (err) {
         reject(err);
@@ -1762,7 +1809,8 @@ const dbHelpers = {
             endDate: p.end_date,
             organizer: p.organizer,
             status: p.status,
-            year: p.year
+            year: p.year,
+            workshopWeekAfterStart: p.workshop_week_after_start === true
           }));
 
           const meetings = meetingsResult.rows.map(m => ({
@@ -1807,7 +1855,8 @@ const dbHelpers = {
                     endDate: p.end_date,
                     organizer: p.organizer,
                     status: p.status,
-                    year: p.year
+                    year: p.year,
+                    workshopWeekAfterStart: p.workshop_week_after_start === 1
                   }));
 
                   const meetings = meetingRows.map(m => ({

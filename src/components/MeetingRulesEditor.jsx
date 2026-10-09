@@ -90,6 +90,12 @@ const MeetingRulesEditor = ({ rules, onChange }) => {
         : `${o.offset.amount} ${UNIT_LABEL[o.offset.unit] || o.offset.unit} ${o.offset.direction === 'before' ? 'före' : 'efter'}`;
       extra = `  ⚠ Från år ${o.fromYear}: ${od} istället.`;
     }
+    if (rule.workshopWeekPlacement) {
+      let wex = '—';
+      try { wex = fmtDate(resolveMeetingDate(rule, s.start, s.end, s.year, { workshopWeekAfterStart: true })); } catch { /* ignore */ }
+      extra += `  Workshopvecka: ${wex}.`;
+    }
+    if (rule.appliesFromStartDate) extra += `  Bara program som startar fr.o.m. ${rule.appliesFromStartDate}.`;
     return `${describeTiming(rule)} → ${describePlacement(rule)}.  Ex (start ${fmtDate(s.start)}): ${ex}${extra}`;
   };
 
@@ -208,6 +214,44 @@ const MeetingRulesEditor = ({ rules, onChange }) => {
                       </select>
                     )}
                   </div>
+
+                  {/* Workshop-week placement (Reception Lunch) + "only programs starting
+                      from" — both optional, shown for every dated rule so neither is a
+                      hidden value. The workshop flag itself is set per program on the
+                      meeting card. */}
+                  {!isWeekly && (
+                    <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
+                      <span className="text-gray-600 w-20">Workshop:</span>
+                      <label className="flex items-center gap-1.5">
+                        <input type="checkbox" checked={!!rule.workshopWeekPlacement}
+                          onChange={(e) => updateRule(type, idx, r => {
+                            if (e.target.checked) r.workshopWeekPlacement = { mode: 'weekday', weekday: 1, snap: 'forward' };
+                            else delete r.workshopWeekPlacement;
+                            return r;
+                          })}
+                          className="w-4 h-4 text-indigo-600 rounded" />
+                        workshopvecka efter start →
+                      </label>
+                      {rule.workshopWeekPlacement && (
+                        <select value={rule.workshopWeekPlacement.weekday ?? 1}
+                          onChange={(e) => updateRule(type, idx, r => {
+                            r.workshopWeekPlacement = { ...r.workshopWeekPlacement, weekday: parseInt(e.target.value, 10) };
+                            return r;
+                          })}
+                          className="border border-gray-300 rounded px-2 py-1.5">
+                          {WEEKDAYS.map((w, i) => <option key={i} value={i}>{w}</option>)}
+                        </select>
+                      )}
+                      <span className="text-gray-600 ml-2">Gäller program som startar fr.o.m.:</span>
+                      <input type="date" value={rule.appliesFromStartDate || ''}
+                        onChange={(e) => updateRule(type, idx, r => {
+                          if (e.target.value) r.appliesFromStartDate = e.target.value;
+                          else delete r.appliesFromStartDate;
+                          return r;
+                        })}
+                        className="border border-gray-300 rounded px-2 py-1.5" />
+                    </div>
+                  )}
 
                   {/* Time / duration / requiresDirectors */}
                   <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
