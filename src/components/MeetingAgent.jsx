@@ -1431,6 +1431,16 @@ const MeetingAgent = () => {
       alert(`The workshop week is saved, but this meeting is locked and stays on its date.\n\nThe rule now gives ${localDateKey(newDate)} — unlock and move it by hand if it should follow.`);
       return;
     }
+    // A lunch moved by hand (not on the date the rule gave before the toggle)
+    // is the admin's own choice — ask before snapping it to the rule date.
+    const oldDate = resolveMeetingDate(rule, program.startDate, program.endDate,
+      program.startDate.getFullYear(), { isBlocked, workshopWeekAfterStart: !value });
+    if (oldDate && localDateKey(oldDate) !== localDateKey(meeting.date) &&
+        !window.confirm(`The workshop week is saved. This meeting has been moved by hand to ${localDateKey(meeting.date)}.
+
+Move it to ${localDateKey(newDate)} as the rule now says?`)) {
+      return;
+    }
     await updateMeetingSchedule(meeting, { date: newDate, time: meeting.time });
   };
 
